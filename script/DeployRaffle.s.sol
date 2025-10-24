@@ -11,10 +11,8 @@ contract DeployRaffle is Script {
 
         // VRF parameters for Base Sepolia
         address vrfCoordinator = 0x5C210eF41CD1a72de73bF76eC39637bB0d3d7BEE; // Base Sepolia VRF Coordinator
-        // Note: Your subscription ID is too large for uint64. 
-        // You may need to create a new subscription or check the correct ID format.
-        // For now, using a placeholder - update with correct subscription ID
-        uint64 subscriptionId = 1; // Replace with your actual subscription ID
+        // Your actual subscription ID (now supports uint256)
+        uint256 subscriptionId = 104463245950711925848002979325066164966376483155872594786291361268349330657388;
         bytes32 keyHash = 0x9e1344a1247c8a1785d0a4681a27152bffdb43666ae5bf7d14d24a5efd44bf71; // 30 gwei Key Hash
         uint32 callbackGasLimit = 200000; // Within the 2,500,000 max gas limit
         uint16 requestConfirmations = 3; // Within the 0-200 range

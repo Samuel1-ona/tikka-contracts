@@ -241,6 +241,37 @@ The contract is configured for deployment on Base Sepolia testnet with the follo
     - Add deployed contract as consumer to VRF subscription
     - This enables the contract to request random numbers
 
+### Deployed Contract Details
+
+**Base Sepolia Deployment (Latest - with receive() function):**
+
+-   **Contract Address**: `0x60fd4f42B818b173d7252859963c7131Ed68CA6D`
+-   **Deployer**: `0xF18ca72961b486318551B827F6A7124cF1caDf81`
+-   **Transaction Hash**: `0x4f6735f049ca6025af24dad02385a4ddfdcb702f02f5eea7e4a53be6ecfd599b`
+-   **Explorer**: [Base Sepolia Explorer](https://sepolia.basescan.org/address/0x60fd4f42B818b173d7252859963c7131Ed68CA6D)
+-   **Features**: Supports large subscription IDs (uint256), native ETH payments for VRF, receive() function for ETH transfers
+
+**Previous Deployment (with uint256 support):**
+
+-   **Contract Address**: `0x69A2F4DeC343B06956738376f07dca1787B342C5`
+-   **Deployer**: `0xF18ca72961b486318551B827F6A7124cF1caDf81`
+-   **Transaction Hash**: `0x065233905b0d633f974406f671c3a77b1b9e609122f838d2f0e855413f16fa51`
+-   **Explorer**: [Base Sepolia Explorer](https://sepolia.basescan.org/address/0x69A2F4DeC343B06956738376f07dca1787B342C5)
+-   **Features**: Supports large subscription IDs (uint256), native ETH payments for VRF
+
+**Previous Deployment (Legacy):**
+
+-   **Contract Address**: `0xed32402c968d04D1d7F6B3DEfcB7A91321736156`
+-   **Deployer**: `0xF18ca72961b486318551B827F6A7124cF1caDf81`
+-   **Transaction Hash**: `0x6a5bf547fea8c67db991f1db74c03484f8b09532112c7a6d2e45fe366c043cb9`
+-   **Explorer**: [Base Sepolia Explorer](https://sepolia.basescan.org/address/0xed32402c968d04D1d7F6B3DEfcB7A91321736156)
+
+**Important**: After deployment, you need to:
+
+1. Call `configureVRF` with your actual subscription ID
+2. Add the contract as a consumer to your VRF subscription
+3. Fund the contract with ETH for VRF requests
+
 See `DEPLOYMENT_GUIDE.md` for detailed deployment instructions.
 
 ## License

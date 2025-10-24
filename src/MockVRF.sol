@@ -10,7 +10,7 @@ import "forge-std/console.sol";
 contract MockVRFCoordinatorV2Plus {
     struct RandomWordsRequest {
         bytes32 keyHash;
-        uint64 subId;
+        uint256 subId;
         uint16 requestConfirmations;
         uint32 callbackGasLimit;
         uint32 numWords;
@@ -98,7 +98,7 @@ abstract contract VRFConsumerBaseV2Plus {
 library VRFV2PlusClient {
     struct RandomWordsRequest {
         bytes32 keyHash;
-        uint64 subId;
+        uint256 subId;
         uint16 requestConfirmations;
         uint32 callbackGasLimit;
         uint32 numWords;

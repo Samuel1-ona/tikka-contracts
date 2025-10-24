@@ -16,7 +16,7 @@ contract Raffle is VRFConsumerBaseV2Plus {
     event PrizeWithdrawn(uint256 indexed raffleId, address indexed winner, address token, uint256 tokenId, uint256 amount);
     event RaffleFinalized(uint256 indexed raffleId, address indexed winner);
     event RandomWinnerRequested(uint256 indexed raffleId, uint256 indexed requestId);
-    event VRFConfigurationUpdated(uint64 subscriptionId, bytes32 keyHash, uint32 callbackGasLimit, uint16 requestConfirmations);
+    event VRFConfigurationUpdated(uint256 subscriptionId, bytes32 keyHash, uint32 callbackGasLimit, uint16 requestConfirmations);
 
     // Structs
     struct RaffleData {
@@ -59,7 +59,7 @@ contract Raffle is VRFConsumerBaseV2Plus {
     address public platformOwner;
     
     // VRF v2.5 variables
-    uint64 public s_subscriptionId;
+    uint256 public s_subscriptionId;
     bytes32 public s_keyHash;
     uint32 public s_callbackGasLimit;
     uint16 public s_requestConfirmations;
@@ -96,7 +96,7 @@ contract Raffle is VRFConsumerBaseV2Plus {
 
     constructor(
         address _vrfCoordinator,
-        uint64 _subscriptionId,
+        uint256 _subscriptionId,
         bytes32 _keyHash,
         uint32 _callbackGasLimit,
         uint16 _requestConfirmations
@@ -990,7 +990,7 @@ contract Raffle is VRFConsumerBaseV2Plus {
      * @param _requestConfirmations Number of confirmations for VRF request
      */
     function configureVRF(
-        uint64 _subscriptionId,
+        uint256 _subscriptionId,
         bytes32 _keyHash,
         uint32 _callbackGasLimit,
         uint16 _requestConfirmations
@@ -1007,7 +1007,7 @@ contract Raffle is VRFConsumerBaseV2Plus {
      * @dev Get VRF configuration
      */
     function getVRFConfiguration() external view returns (
-        uint64 subscriptionId,
+        uint256 subscriptionId,
         bytes32 keyHash,
         uint32 callbackGasLimit,
         uint16 requestConfirmations,
@@ -1022,5 +1022,12 @@ contract Raffle is VRFConsumerBaseV2Plus {
      */
     function hasPendingVRFRequest(uint256 _raffleId) external view raffleExists(_raffleId) returns (bool) {
         return pendingVRFRequests[_raffleId];
+    }
+
+    /**
+     * @dev Receive function to accept ETH payments
+     */
+    receive() external payable {
+        // Accept ETH payments for VRF requests
     }
 }
