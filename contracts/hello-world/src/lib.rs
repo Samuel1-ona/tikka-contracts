@@ -229,6 +229,7 @@ impl Contract {
         raffle.tickets_sold
     }
 
+
     /// Finalizes a raffle and selects a winner.
     ///
     /// # Arguments
@@ -242,6 +243,81 @@ impl Contract {
     /// * If the raffle is inactive
     /// * If the raffle has not ended yet
     /// * If no tickets were sold
+
+    /// Purchases multiple tickets for the specified raffle in a single transaction.
+    ///
+    /// # Arguments
+    /// * `raffle_id` - The ID of the raffle
+    /// * `buyer` - The address purchasing the tickets (must be authenticated)
+    /// * `quantity` - The number of tickets to purchase
+    ///
+    /// # Returns
+    /// * `u32` - The total number of tickets sold for this raffle after purchase
+    ///
+    /// # Panics
+    /// * If quantity is zero
+    /// * If the raffle is inactive
+    /// * If the raffle has ended
+    /// * If quantity exceeds available tickets (max_tickets - tickets_sold)
+    /// * If multiple tickets are not allowed and buyer already has tickets
+    /// * If multiple tickets are not allowed and quantity > 1
+    pub fn buy_tickets(env: Env, raffle_id: u64, buyer: Address, quantity: u32) -> u32 {
+        buyer.require_auth();
+        
+        if quantity == 0 {
+            panic!("quantity_zero");
+        }
+        
+        let mut raffle = read_raffle(&env, raffle_id);
+        if !raffle.is_active {
+            panic!("raffle_inactive");
+        }
+        if env.ledger().timestamp() > raffle.end_time {
+            panic!("raffle_ended");
+        }
+        
+        let available_tickets = raffle.max_tickets - raffle.tickets_sold;
+        if quantity > available_tickets {
+            panic!("insufficient_tickets_available");
+        }
+
+        let current_count = read_ticket_count(&env, raffle_id, &buyer);
+        if !raffle.allow_multiple {
+            if current_count > 0 {
+                panic!("multiple_tickets_not_allowed");
+            }
+            if quantity > 1 {
+                panic!("multiple_tickets_not_allowed");
+            }
+        }
+
+        // Calculate total cost: quantity × ticket_price
+        let total_cost = raffle
+            .ticket_price
+            .checked_mul(quantity as i128)
+            .unwrap_or_else(|| panic!("cost_overflow"));
+
+        // Process single payment transfer
+        let token_client = token::Client::new(&env, &raffle.payment_token);
+        let contract_address = env.current_contract_address();
+        token_client.transfer(&buyer, &contract_address, &total_cost);
+
+        // Add tickets to storage
+        let mut tickets = read_tickets(&env, raffle_id);
+        for _ in 0..quantity {
+            tickets.push_back(buyer.clone());
+        }
+        write_tickets(&env, raffle_id, &tickets);
+
+        // Update raffle state
+        raffle.tickets_sold += quantity;
+        write_ticket_count(&env, raffle_id, &buyer, current_count + quantity);
+        write_raffle(&env, &raffle);
+
+        raffle.tickets_sold
+    }
+
+
     pub fn finalize_raffle(env: Env, raffle_id: u64) -> Address {
         let mut raffle = read_raffle(&env, raffle_id);
         raffle.creator.require_auth();
