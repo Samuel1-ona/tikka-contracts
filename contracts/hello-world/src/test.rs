@@ -1,10 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{
-    testutils::Address as _,
-    token, Address, Env, String,
-};
+use soroban_sdk::{testutils::Address as _, token, Address, Env, String};
 
 #[test]
 fn test_basic_raffle_flow() {
@@ -316,7 +313,7 @@ fn test_buy_tickets_allow_multiple_true_allows_multiple() {
 
     let raffle = client.get_raffle(&raffle_id);
     assert_eq!(raffle.tickets_sold, 5);
-    
+
     let initial_balance = token_client.balance(&buyer);
     assert_eq!(initial_balance, 10_000 - (5 * 10)); // 5 tickets × 10 price = 50
 }

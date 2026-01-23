@@ -273,7 +273,6 @@ impl Contract {
         raffle.tickets_sold
     }
 
-
     /// Finalizes a raffle and selects a winner.
     ///
     /// # Arguments
@@ -307,11 +306,11 @@ impl Contract {
     /// * If multiple tickets are not allowed and quantity > 1
     pub fn buy_tickets(env: Env, raffle_id: u64, buyer: Address, quantity: u32) -> u32 {
         buyer.require_auth();
-        
+
         if quantity == 0 {
             panic!("quantity_zero");
         }
-        
+
         let mut raffle = read_raffle(&env, raffle_id);
         if !raffle.is_active {
             panic!("raffle_inactive");
@@ -319,7 +318,7 @@ impl Contract {
         if env.ledger().timestamp() > raffle.end_time {
             panic!("raffle_ended");
         }
-        
+
         let available_tickets = raffle.max_tickets - raffle.tickets_sold;
         if quantity > available_tickets {
             panic!("insufficient_tickets_available");
@@ -360,7 +359,6 @@ impl Contract {
 
         raffle.tickets_sold
     }
-
 
     pub fn finalize_raffle(env: Env, raffle_id: u64) -> Address {
         let mut raffle = read_raffle(&env, raffle_id);
@@ -414,7 +412,7 @@ impl Contract {
         }
 
         let gross_amount = raffle.prize_amount;
-        let platform_fee = 0i128; 
+        let platform_fee = 0i128;
         let net_amount = gross_amount - platform_fee;
         let claimed_at = env.ledger().timestamp();
 
@@ -424,7 +422,13 @@ impl Contract {
 
         env.events().publish(
             (symbol_short!("prize"), raffle_id),
-            (winner.clone(), gross_amount, net_amount, platform_fee, claimed_at),
+            (
+                winner.clone(),
+                gross_amount,
+                net_amount,
+                platform_fee,
+                claimed_at,
+            ),
         );
 
         raffle.prize_claimed = true;
@@ -471,7 +475,7 @@ impl Contract {
             }
             let raffle_id = all_active.get(i).unwrap();
             let raffle = read_raffle(&env, raffle_id);
-            
+
             if raffle.is_active && raffle.end_time > current_time {
                 if skipped < offset {
                     skipped += 1;
