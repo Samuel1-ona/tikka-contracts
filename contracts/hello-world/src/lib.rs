@@ -44,6 +44,7 @@ pub enum DataKey {
     Raffle(u64),
     Tickets(u64),
     TicketCount(u64, Address),
+    ActiveRaffles,
 }
 
 #[derive(Clone)]
@@ -107,6 +108,37 @@ fn next_raffle_id(env: &Env) -> u64 {
         .persistent()
         .set(&DataKey::NextRaffleId, &next);
     current
+}
+
+fn read_active_raffles(env: &Env) -> Vec<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::ActiveRaffles)
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+fn write_active_raffles(env: &Env, active_raffles: &Vec<u64>) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::ActiveRaffles, active_raffles);
+}
+
+fn add_active_raffle(env: &Env, raffle_id: u64) {
+    let mut active_raffles = read_active_raffles(env);
+    active_raffles.push_back(raffle_id);
+    write_active_raffles(env, &active_raffles);
+}
+
+fn remove_active_raffle(env: &Env, raffle_id: u64) {
+    let mut active_raffles = read_active_raffles(env);
+    let mut new_active = Vec::new(env);
+    for i in 0..active_raffles.len() {
+        let id = active_raffles.get(i).unwrap();
+        if id != raffle_id {
+            new_active.push_back(id);
+        }
+    }
+    write_active_raffles(env, &new_active);
 }
 
 #[contractimpl]
@@ -175,6 +207,7 @@ impl Contract {
             winner: None,
         };
         write_raffle(&env, &raffle);
+        add_active_raffle(&env, raffle_id);
         raffle_id
     }
 
@@ -350,7 +383,6 @@ impl Contract {
         raffle.tickets_sold
     }
 
-
     /// Finalizes a raffle and selects a winner.
     ///
     /// # Arguments
@@ -384,11 +416,11 @@ impl Contract {
     /// * If multiple tickets are not allowed and quantity > 1
     pub fn buy_tickets(env: Env, raffle_id: u64, buyer: Address, quantity: u32) -> u32 {
         buyer.require_auth();
-        
+
         if quantity == 0 {
             panic!("quantity_zero");
         }
-        
+
         let mut raffle = read_raffle(&env, raffle_id);
         if !raffle.is_active {
             panic!("raffle_inactive");
@@ -396,7 +428,7 @@ impl Contract {
         if env.ledger().timestamp() > raffle.end_time {
             panic!("raffle_ended");
         }
-        
+
         let available_tickets = raffle.max_tickets - raffle.tickets_sold;
         if quantity > available_tickets {
             panic!("insufficient_tickets_available");
@@ -438,7 +470,6 @@ impl Contract {
         raffle.tickets_sold
     }
 
-
     pub fn finalize_raffle(env: Env, raffle_id: u64) -> Address {
         let mut raffle = read_raffle(&env, raffle_id);
         raffle.creator.require_auth();
@@ -460,6 +491,7 @@ impl Contract {
         raffle.is_active = false;
         raffle.winner = Some(winner.clone());
         write_raffle(&env, &raffle);
+        remove_active_raffle(&env, raffle_id);
         winner
     }
 
@@ -490,7 +522,7 @@ impl Contract {
         }
 
         let gross_amount = raffle.prize_amount;
-        let platform_fee = 0i128; 
+        let platform_fee = 0i128;
         let net_amount = gross_amount - platform_fee;
         let claimed_at = env.ledger().timestamp();
 
@@ -499,20 +531,19 @@ impl Contract {
         token_client.transfer(&contract_address, &winner, &net_amount);
 
         env.events().publish(
-            (Symbol::new(&env, "PrizeClaimed"), raffle_id),
-            PrizeClaimed {
-                raffle_id,
-                winner: winner.clone(),
+            (symbol_short!("prize"), raffle_id),
+            (
+                winner.clone(),
                 gross_amount,
                 net_amount,
                 platform_fee,
                 claimed_at,
-            },
+            ),
         );
 
         raffle.prize_claimed = true;
         write_raffle(&env, &raffle);
-        prize_amount
+        net_amount
     }
 
     /// Retrieves raffle information by ID.
@@ -580,6 +611,34 @@ impl Contract {
     /// * `Vec<Address>` - Vector of addresses representing ticket buyers
     pub fn get_tickets(env: Env, raffle_id: u64) -> Vec<Address> {
         read_tickets(&env, raffle_id)
+    }
+
+    pub fn get_active_raffle_ids(env: Env, offset: u32, limit: u32) -> Vec<u64> {
+        let capped_limit = if limit > 100 { 100 } else { limit };
+        let all_active = read_active_raffles(&env);
+        let current_time = env.ledger().timestamp();
+        let mut result = Vec::new(&env);
+        let mut count = 0u32;
+        let mut skipped = 0u32;
+
+        for i in 0..all_active.len() {
+            if count >= capped_limit {
+                break;
+            }
+            let raffle_id = all_active.get(i).unwrap();
+            let raffle = read_raffle(&env, raffle_id);
+
+            if raffle.is_active && raffle.end_time > current_time {
+                if skipped < offset {
+                    skipped += 1;
+                    continue;
+                }
+                result.push_back(raffle_id);
+                count += 1;
+            }
+        }
+
+        result
     }
 }
 
