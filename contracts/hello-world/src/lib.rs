@@ -1,4 +1,5 @@
 #![no_std]
+use core::cmp::min;
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, Env, String, Vec,
 };
@@ -23,6 +24,17 @@ pub struct Raffle {
     pub prize_deposited: bool,
     pub prize_claimed: bool,
     pub winner: Option<Address>,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct PrizeClaimed {
+    pub raffle_id: u64,
+    pub winner: Address,
+    pub gross_amount: i128,
+    pub net_amount: i128,
+    pub platform_fee: i128,
+    pub claimed_at: u64,
 }
 
 #[derive(Clone)]
@@ -99,6 +111,26 @@ fn next_raffle_id(env: &Env) -> u64 {
 
 #[contractimpl]
 impl Contract {
+    /// Creates a new raffle with the specified parameters.
+    ///
+    /// # Arguments
+    /// * `creator` - The address creating the raffle (must be authenticated)
+    /// * `description` - Description of the raffle
+    /// * `end_time` - Unix timestamp when the raffle ends
+    /// * `max_tickets` - Maximum number of tickets that can be sold
+    /// * `allow_multiple` - Whether a single buyer can purchase multiple tickets
+    /// * `ticket_price` - Price per ticket in payment token units
+    /// * `payment_token` - Address of the token contract for payments
+    /// * `prize_amount` - Amount of prize in payment token units
+    ///
+    /// # Returns
+    /// * `u64` - The ID of the newly created raffle
+    ///
+    /// # Panics
+    /// * If end_time is in the past
+    /// * If max_tickets is zero
+    /// * If ticket_price is invalid (<= 0)
+    /// * If prize_amount is invalid (<= 0)
     pub fn create_raffle(
         env: Env,
         creator: Address,
@@ -146,6 +178,15 @@ impl Contract {
         raffle_id
     }
 
+    /// Deposits the prize amount into the contract escrow.
+    ///
+    /// # Arguments
+    /// * `raffle_id` - The ID of the raffle
+    ///
+    /// # Panics
+    /// * If the caller is not the creator
+    /// * If the raffle is inactive
+    /// * If the prize has already been deposited
     pub fn deposit_prize(env: Env, raffle_id: u64) {
         let mut raffle = read_raffle(&env, raffle_id);
         raffle.creator.require_auth();
@@ -164,6 +205,20 @@ impl Contract {
         write_raffle(&env, &raffle);
     }
 
+    /// Purchases a ticket for the specified raffle.
+    ///
+    /// # Arguments
+    /// * `raffle_id` - The ID of the raffle
+    /// * `buyer` - The address purchasing the ticket (must be authenticated)
+    ///
+    /// # Returns
+    /// * `u32` - The total number of tickets sold for this raffle after purchase
+    ///
+    /// # Panics
+    /// * If the raffle is inactive
+    /// * If the raffle has ended
+    /// * If all tickets are sold out
+    /// * If multiple tickets are not allowed and buyer already has a ticket
     pub fn buy_ticket(env: Env, raffle_id: u64, buyer: Address) -> u32 {
         buyer.require_auth();
         let mut raffle = read_raffle(&env, raffle_id);
@@ -295,6 +350,95 @@ impl Contract {
         raffle.tickets_sold
     }
 
+
+    /// Finalizes a raffle and selects a winner.
+    ///
+    /// # Arguments
+    /// * `raffle_id` - The ID of the raffle to finalize
+    ///
+    /// # Returns
+    /// * `Address` - The address of the winner
+    ///
+    /// # Panics
+    /// * If the caller is not the creator
+    /// * If the raffle is inactive
+    /// * If the raffle has not ended yet
+    /// * If no tickets were sold
+
+    /// Purchases multiple tickets for the specified raffle in a single transaction.
+    ///
+    /// # Arguments
+    /// * `raffle_id` - The ID of the raffle
+    /// * `buyer` - The address purchasing the tickets (must be authenticated)
+    /// * `quantity` - The number of tickets to purchase
+    ///
+    /// # Returns
+    /// * `u32` - The total number of tickets sold for this raffle after purchase
+    ///
+    /// # Panics
+    /// * If quantity is zero
+    /// * If the raffle is inactive
+    /// * If the raffle has ended
+    /// * If quantity exceeds available tickets (max_tickets - tickets_sold)
+    /// * If multiple tickets are not allowed and buyer already has tickets
+    /// * If multiple tickets are not allowed and quantity > 1
+    pub fn buy_tickets(env: Env, raffle_id: u64, buyer: Address, quantity: u32) -> u32 {
+        buyer.require_auth();
+        
+        if quantity == 0 {
+            panic!("quantity_zero");
+        }
+        
+        let mut raffle = read_raffle(&env, raffle_id);
+        if !raffle.is_active {
+            panic!("raffle_inactive");
+        }
+        if env.ledger().timestamp() > raffle.end_time {
+            panic!("raffle_ended");
+        }
+        
+        let available_tickets = raffle.max_tickets - raffle.tickets_sold;
+        if quantity > available_tickets {
+            panic!("insufficient_tickets_available");
+        }
+
+        let current_count = read_ticket_count(&env, raffle_id, &buyer);
+        if !raffle.allow_multiple {
+            if current_count > 0 {
+                panic!("multiple_tickets_not_allowed");
+            }
+            if quantity > 1 {
+                panic!("multiple_tickets_not_allowed");
+            }
+        }
+
+        // Calculate total cost: quantity × ticket_price
+        let total_cost = raffle
+            .ticket_price
+            .checked_mul(quantity as i128)
+            .unwrap_or_else(|| panic!("cost_overflow"));
+
+        // Process single payment transfer
+        let token_client = token::Client::new(&env, &raffle.payment_token);
+        let contract_address = env.current_contract_address();
+        token_client.transfer(&buyer, &contract_address, &total_cost);
+
+        // Add tickets to storage
+        let mut tickets = read_tickets(&env, raffle_id);
+        for _ in 0..quantity {
+            tickets.push_back(buyer.clone());
+        }
+        write_tickets(&env, raffle_id, &tickets);
+
+        // Update raffle state
+        raffle.tickets_sold += quantity;
+        write_ticket_count(&env, raffle_id, &buyer, current_count + quantity);
+        write_raffle(&env, &raffle);
+
+        raffle.tickets_sold
+    }
+
+
     pub fn finalize_raffle(env: Env, raffle_id: u64) -> Address {
         let mut raffle = read_raffle(&env, raffle_id);
         raffle.creator.require_auth();
@@ -319,7 +463,20 @@ impl Contract {
         winner
     }
 
-    pub fn claim_prize(env: Env, raffle_id: u64, winner: Address) {
+    /// Claims the prize for the winner of a raffle.
+    ///
+    /// # Arguments
+    /// * `raffle_id` - The ID of the raffle
+    /// * `winner` - The address of the winner (must be authenticated)
+    ///
+    /// # Returns
+    /// * `i128` - The amount of prize claimed
+    ///
+    /// # Panics
+    /// * If the caller is not the winner
+    /// * If the prize has not been deposited
+    /// * If the prize has already been claimed
+    pub fn claim_prize(env: Env, raffle_id: u64, winner: Address) -> i128 {
         winner.require_auth();
         let mut raffle = read_raffle(&env, raffle_id);
         if raffle.winner != Some(winner.clone()) {
@@ -332,18 +489,95 @@ impl Contract {
             panic!("prize_already_claimed");
         }
 
+        let gross_amount = raffle.prize_amount;
+        let platform_fee = 0i128; 
+        let net_amount = gross_amount - platform_fee;
+        let claimed_at = env.ledger().timestamp();
+
         let token_client = token::Client::new(&env, &raffle.payment_token);
         let contract_address = env.current_contract_address();
-        token_client.transfer(&contract_address, &winner, &raffle.prize_amount);
+        token_client.transfer(&contract_address, &winner, &net_amount);
+
+        env.events().publish(
+            (Symbol::new(&env, "PrizeClaimed"), raffle_id),
+            PrizeClaimed {
+                raffle_id,
+                winner: winner.clone(),
+                gross_amount,
+                net_amount,
+                platform_fee,
+                claimed_at,
+            },
+        );
 
         raffle.prize_claimed = true;
         write_raffle(&env, &raffle);
+        prize_amount
     }
 
+    /// Retrieves raffle information by ID.
+    ///
+    /// # Arguments
+    /// * `raffle_id` - The ID of the raffle to retrieve
+    ///
+    /// # Returns
+    /// * `Raffle` - The raffle data structure
+    ///
+    /// # Panics
+    /// * If the raffle does not exist
     pub fn get_raffle(env: Env, raffle_id: u64) -> Raffle {
         read_raffle(&env, raffle_id)
     }
 
+    /// Retrieves all raffle IDs with pagination.
+    ///
+    /// Pagination is applied after sorting. `offset` is the index within the
+    /// sorted list. `limit` is capped at 100.
+    pub fn get_all_raffle_ids(
+        env: Env,
+        offset: u32,
+        limit: u32,
+        newest_first: bool,
+    ) -> Vec<u64> {
+        let total = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NextRaffleId)
+            .unwrap_or(0u64);
+        let capped_limit = min(limit, 100u32);
+        let mut result = Vec::new(&env);
+
+        if capped_limit == 0 || total == 0 {
+            return result;
+        }
+
+        let offset_u64 = offset as u64;
+        if offset_u64 >= total {
+            return result;
+        }
+
+        let end = min(offset_u64 + capped_limit as u64, total);
+        if newest_first {
+            for position in offset_u64..end {
+                let raffle_id = total - 1 - position;
+                result.push_back(raffle_id);
+            }
+        } else {
+            for raffle_id in offset_u64..end {
+                result.push_back(raffle_id);
+            }
+        }
+
+        result
+    }
+
+    /// Retrieves all ticket buyers for a raffle.
+    ///
+    /// # Arguments
+    /// * `raffle_id` - The ID of the raffle
+    ///
+    /// # Returns
+    /// * `Vec<Address>` - Vector of addresses representing ticket buyers
     pub fn get_tickets(env: Env, raffle_id: u64) -> Vec<Address> {
         read_tickets(&env, raffle_id)
     }

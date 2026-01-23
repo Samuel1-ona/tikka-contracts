@@ -7,6 +7,25 @@ use soroban_sdk::{
     token, Address, Env, String,
 };
 
+fn create_raffle(
+    env: &Env,
+    client: &ContractClient,
+    creator: &Address,
+    token_id: &Address,
+    end_time: u64,
+) -> u64 {
+    client.create_raffle(
+        creator,
+        &String::from_str(env, "Test Raffle"),
+        &end_time,
+        &10u32,
+        &true,
+        &1i128,
+        token_id,
+        &10i128,
+    )
+}
+
 #[test]
 fn test_basic_raffle_flow() {
     let env = Env::default();
@@ -41,11 +60,12 @@ fn test_basic_raffle_flow() {
     client.deposit_prize(&raffle_id);
     client.buy_ticket(&raffle_id, &buyer);
     let winner = client.finalize_raffle(&raffle_id);
-    client.claim_prize(&raffle_id, &winner);
+    let claimed_amount = client.claim_prize(&raffle_id, &winner);
 
     let winner_balance = token_client.balance(&winner);
     let creator_balance = token_client.balance(&creator);
 
+    assert_eq!(claimed_amount, 100i128);
     assert_eq!(winner_balance, 1_090);
     assert_eq!(creator_balance, 900);
 }
