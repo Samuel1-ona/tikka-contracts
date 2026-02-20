@@ -9,6 +9,8 @@ use soroban_sdk::{
 /// HELPER: Standardized environment setup
 fn setup_raffle_env(
     env: &Env,
+    source: RandomnessSource,
+    oracle: Option<Address>,
 ) -> (
     ContractClient<'_>,
     Address,
@@ -31,17 +33,19 @@ fn setup_raffle_env(
     let contract_id = env.register(Contract, ());
     let client = ContractClient::new(env, &contract_id);
 
-    client.init(
-        &factory,
-        &creator,
-        &String::from_str(env, "Audit Raffle"),
-        &0,
-        &5, // Reduced to 5 for easier testing
-        &false,
-        &10i128,
-        &token_id,
-        &100i128,
-    );
+    let config = RaffleConfig {
+        description: String::from_str(env, "Audit Raffle"),
+        end_time: 0,
+        max_tickets: 5,
+        allow_multiple: false,
+        ticket_price: 10i128,
+        payment_token: token_id,
+        prize_amount: 100i128,
+        randomness_source: source,
+        oracle_address: oracle,
+    };
+
+    client.init(&factory, &creator, &config);
 
     (client, creator, buyer, admin_client, factory)
 }
@@ -49,66 +53,74 @@ fn setup_raffle_env(
 // --- 1. FUNCTIONAL FLOW TESTS ---
 
 #[test]
-fn test_basic_raffle_flow() {
+fn test_basic_internal_raffle_flow() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, creator, buyer, admin_client, _) = setup_raffle_env(&env);
+    let (client, creator, _buyer, admin_client, _) =
+        setup_raffle_env(&env, RandomnessSource::Internal, None);
     let token_client = token::Client::new(&env, &admin_client.address);
 
     client.deposit_prize();
 
-    // We need 5 different buyers because allow_multiple is false
     for _ in 0..5 {
         let b = Address::generate(&env);
         admin_client.mint(&b, &10i128);
         client.buy_ticket(&b);
     }
 
-    let winner = client.finalize_raffle(&String::from_str(&env, "prng"));
+    client.finalize_raffle();
+
+    let raffle = client.get_raffle();
+    let winner = raffle.winner.unwrap();
     let _claimed_amount = client.claim_prize(&winner);
 
-    assert_eq!(token_client.balance(&winner), 100i128); // mint 10 - ticket 10 + prize 100
-    assert_eq!(token_client.balance(&creator), 900i128); // mint 1000 - prize 100
+    assert_eq!(token_client.balance(&winner), 100i128);
+    assert_eq!(token_client.balance(&creator), 900i128);
 }
 
-// --- 2. RANDOMNESS SOURCE TESTS ---
-
 #[test]
-fn test_randomness_source_prng() {
+fn test_vrf_raffle_flow() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, _buyer, admin_client, _) = setup_raffle_env(&env);
+
+    // Create a NEW environment for the contract to ensure we don't have lingering state
+    // Actually, just register the oracle as a dummy contract
+    #[contract]
+    pub struct DummyOracle;
+    #[contractimpl]
+    impl DummyOracle {}
+    let oracle = env.register(DummyOracle, ());
+
+    let (client, _, _buyer, admin_client, _) =
+        setup_raffle_env(&env, RandomnessSource::External, Some(oracle.clone()));
 
     client.deposit_prize();
+
+    let mut buyers = Vec::new(&env);
     for _ in 0..5 {
         let b = Address::generate(&env);
+        buyers.push_back(b.clone());
         admin_client.mint(&b, &10i128);
         client.buy_ticket(&b);
     }
 
-    let source = String::from_str(&env, "prng");
-    let winner = client.finalize_raffle(&source);
+    client.finalize_raffle();
 
-    assert!(winner != Address::generate(&env)); // Should be one of the buyers
-}
+    let raffle_pre = client.get_raffle();
+    assert!(matches!(raffle_pre.status, RaffleStatus::Drawing));
 
-#[test]
-fn test_randomness_source_oracle() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _, _buyer, admin_client, _) = setup_raffle_env(&env);
+    let seed = 12345u64;
+    let expected_winner_idx = (seed % 5) as u32;
+    let expected_winner = buyers.get(expected_winner_idx).unwrap();
 
-    client.deposit_prize();
-    for _ in 0..5 {
-        let b = Address::generate(&env);
-        admin_client.mint(&b, &10i128);
-        client.buy_ticket(&b);
-    }
+    // Instead of as_contract, call via the client to simulate cross-contract call from oracle
+    env.as_contract(&oracle, || {
+        client.provide_randomness(&seed);
+    });
 
-    let source = String::from_str(&env, "oracle");
-    let winner = client.finalize_raffle(&source);
-
-    assert!(winner != Address::generate(&env));
+    let raffle_post = client.get_raffle();
+    assert!(matches!(raffle_post.status, RaffleStatus::Finalized));
+    assert_eq!(raffle_post.winner.unwrap(), expected_winner);
 }
 
 // --- 3. EVENT AUDIT & STATE VALIDATION ---
@@ -123,7 +135,7 @@ fn test_raffle_finalized_event_audit() {
         l.timestamp = expected_timestamp;
     });
 
-    let (client, _, _buyer_1, admin_client, _) = setup_raffle_env(&env);
+    let (client, _, _, admin_client, _) = setup_raffle_env(&env, RandomnessSource::Internal, None);
 
     client.deposit_prize();
     for _ in 0..5 {
@@ -132,7 +144,7 @@ fn test_raffle_finalized_event_audit() {
         client.buy_ticket(&b);
     }
 
-    let _winner = client.finalize_raffle(&String::from_str(&env, "oracle"));
+    client.finalize_raffle();
 
     let events = env.events().all();
     let mut found = false;
@@ -151,7 +163,7 @@ fn test_single_ticket_purchase_event() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (client, _, buyer, _, _) = setup_raffle_env(&env);
+    let (client, _, buyer, _, _) = setup_raffle_env(&env, RandomnessSource::Internal, None);
 
     client.deposit_prize();
 
@@ -169,7 +181,8 @@ fn test_single_ticket_purchase_event() {
 fn test_raffle_cancellation() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, creator, buyer, admin_client, _) = setup_raffle_env(&env);
+    let (client, creator, buyer, admin_client, _) =
+        setup_raffle_env(&env, RandomnessSource::Internal, None);
     let token_client = token::Client::new(&env, &admin_client.address);
 
     client.deposit_prize();
@@ -177,7 +190,6 @@ fn test_raffle_cancellation() {
 
     client.cancel_raffle();
 
-    // Creator should get prize back
     assert_eq!(token_client.balance(&creator), 1000i128);
 
     let raffle = client.get_raffle();
