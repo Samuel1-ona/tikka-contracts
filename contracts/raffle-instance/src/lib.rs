@@ -17,8 +17,10 @@ use self::randomness::{OracleSeedWinnerSelection, WinnerSelectionStrategy};
 
 use crate::events::{
     DrawTriggered, PrizeClaimed, PrizeDeposited, PrizeRefunded, RaffleCancelled, RaffleCreated,
-    RaffleFinalized, RaffleStatusChanged, RandomnessFallbackTriggered, RandomnessReceived,
-    RandomnessRequested, TicketPurchased, WinnerDrawn,
+    RaffleFinalized, RaffleStatusChanged, RandomnessReceived,
+    RandomnessRequested, TicketPurchased,
+    WinnerDrawn, RandomnessFallbackTriggered,
+    ContractPaused, ContractUnpaused,
 };
 
 const ORACLE_TIMEOUT_LEDGERS: u32 = 200;
@@ -294,6 +296,7 @@ impl Contract {
     }
 
     pub fn deposit_prize(env: Env) -> Result<(), Error> {
+        require_not_paused(&env)?;
         let mut raffle = read_raffle(&env)?;
         raffle.creator.require_auth();
 
@@ -442,7 +445,6 @@ impl Contract {
     pub fn finalize_raffle(env: Env) -> Result<(), Error> {
         let mut raffle = read_raffle(&env)?;
         raffle.creator.require_auth();
-        require_not_paused(&env)?;
 
         // Issue #166: Only allow finalization from Active state to prevent multiple calls
         if raffle.status != RaffleStatus::Active {
@@ -596,7 +598,6 @@ impl Contract {
 
     pub fn claim_prize(env: Env, winner: Address, tier_index: u32) -> Result<i128, Error> {
         winner.require_auth();
-        require_not_paused(&env)?;
         acquire_guard(&env)?;
         let mut raffle = read_raffle(&env)?;
 
@@ -834,6 +835,12 @@ impl Contract {
             .ok_or(Error::NotAuthorized)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &true);
+
+        ContractPaused {
+            paused_by: factory,
+            timestamp: env.ledger().timestamp(),
+        }.publish(&env);
+
         Ok(())
     }
 
@@ -845,7 +852,20 @@ impl Contract {
             .ok_or(Error::NotAuthorized)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &false);
+
+        ContractUnpaused {
+            unpaused_by: factory,
+            timestamp: env.ledger().timestamp(),
+        }.publish(&env);
+
         Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), Error> {
