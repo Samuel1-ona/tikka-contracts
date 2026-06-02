@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, token, xdr::ToXdr, Address, Bytes, BytesN,
+    contract, contracterror, contractimpl, contracttype, token, xdr::ToXdr, Address, Bytes, BytesN,
     Env, IntoVal, String, Symbol, Vec,
 };
 
@@ -28,11 +28,16 @@ use crate::events::{
 const ORACLE_TIMEOUT_LEDGERS: u32 = 200;
 pub const MAX_DESCRIPTION_LENGTH: u32 = 1000;
 pub const MAX_TICKETS_LIMIT: u32 = 100_000;
+pub const MAX_PRIZES: u32 = 100;
 pub const MIN_TICKET_PRICE: i128 = 10_000;
+/// Default and bounds for the claim lockup delay (#259).
+pub const DEFAULT_CLAIM_LOCKUP_SECONDS: u64 = 3_600;
+pub const MAX_CLAIM_LOCKUP_SECONDS: u64 = 604_800; // 7 days
 
 #[contract]
 pub struct Contract;
 
+#[contracttype]
 #[derive(Clone)]
 pub struct Raffle {
     pub creator: Address,
@@ -58,8 +63,11 @@ pub struct Raffle {
     pub tikka_token: Option<Address>,
     pub finalized_at: Option<u64>,
     pub winner_ticket_id: Option<u32>,
+    /// Seconds after finalization before winners may claim (#259).
+    pub claim_lockup_seconds: u64,
 }
 
+#[contracttype]
 #[derive(Clone)]
 pub struct FairnessMetadata {
     pub seed: u64,
@@ -111,6 +119,7 @@ pub enum Error {
     InsufficientTickets = 31,
     MultipleTicketsNotAllowed = 32,
     NoTicketsSold = 33,
+    NoActiveTickets = 46,
     TicketNotFound = 34,
     RaffleEnded = 35,
     ArithmeticOverflow = 41,
@@ -118,6 +127,8 @@ pub enum Error {
     NotInitialized = 43,
     Reentrancy = 44,
     TokenTransferFailed = 45,
+    TooManyPrizes = 47,
+
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -232,6 +243,9 @@ impl Contract {
         if config.prizes.len() == 0 {
             return Err(Error::InvalidParameters);
         }
+        if config.prizes.len() > MAX_PRIZES {
+            return Err(Error::TooManyPrizes);
+        }
         let mut total_prizes_bp = 0u32;
         for prize_bp in config.prizes.iter() {
             total_prizes_bp += prize_bp;
@@ -246,6 +260,17 @@ impl Contract {
         }
 
         if config.metadata_hash == BytesN::from_array(&env, &[0u8; 32]) {
+            return Err(Error::InvalidParameters);
+        }
+
+        // #259: claim_lockup_seconds must be within [0, MAX_CLAIM_LOCKUP_SECONDS].
+        // Zero is interpreted as "use the default".
+        let claim_lockup_seconds = if config.claim_lockup_seconds == 0 {
+            DEFAULT_CLAIM_LOCKUP_SECONDS
+        } else {
+            config.claim_lockup_seconds
+        };
+        if claim_lockup_seconds > MAX_CLAIM_LOCKUP_SECONDS {
             return Err(Error::InvalidParameters);
         }
 
@@ -273,6 +298,7 @@ impl Contract {
             tikka_token: config.tikka_token,
             finalized_at: None,
             winner_ticket_id: None,
+            claim_lockup_seconds,
         };
         write_raffle(&env, &raffle);
         env.storage().instance().set(&DataKey::Factory, &factory);
@@ -555,7 +581,14 @@ impl Contract {
             return Err(Error::InvalidStatus);
         }
 
-        if tier_index as usize >= raffle.winners.len() {
+        // #259: enforce the configurable lockup delay.
+        if let Some(finalized_at) = raffle.finalized_at {
+            if env.ledger().timestamp() < finalized_at + raffle.claim_lockup_seconds {
+                return Err(Error::ClaimTooEarly);
+            }
+        }
+
+        if tier_index >= raffle.winners.len() {
             return Err(Error::InvalidParameters);
         }
 
@@ -671,6 +704,8 @@ impl Contract {
         acquire_guard(&env)?;
         let raffle = read_raffle(&env)?;
 
+        // #258: status check BEFORE require_auth to prevent double-spend on
+        // status transitions that occur between auth and the gate.
         if raffle.status != RaffleStatus::Cancelled && raffle.status != RaffleStatus::Failed {
             return Err(Error::InvalidStatus);
         }
@@ -791,6 +826,14 @@ fn do_finalize_with_seed(
         return Err(Error::NoTicketsSold);
     }
 
+    // #256: Guard against all tickets being refunded after the draw window
+    // opened but before finalize runs, which would make the winners Vec empty
+    // and cause a panic on the winner_index lookup.
+    let active_count = raffle.tickets_sold;
+    if active_count == 0 {
+        return Err(Error::NoActiveTickets);
+    }
+
     let selector = OracleSeedWinnerSelection::new(seed);
     let winning_ticket_ids =
         selector.select_winner_indices(env, total_tickets, raffle.prizes.len() as u32);
@@ -842,4 +885,58 @@ fn do_finalize_with_seed(
     }.publish(&env);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod prize_limit_tests {
+    use super::*;
+    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::{Address, BytesN, String as SorobanString, Vec};
+
+    fn base_config(env: &Env, prizes: Vec<u32>) -> RaffleConfig {
+        RaffleConfig {
+            description: SorobanString::from_str(env, "test raffle"),
+            end_time: 0,
+            max_tickets: 1_000,
+            min_tickets: 1,
+            allow_multiple: false,
+            ticket_price: MIN_TICKET_PRICE,
+            payment_token: Address::generate(env),
+            prize_amount: MIN_TICKET_PRICE,
+            prizes,
+            randomness_source: RandomnessSource::Internal,
+            oracle_address: None,
+            protocol_fee_bp: 0,
+            treasury_address: None,
+            swap_router: None,
+            tikka_token: None,
+            metadata_hash: BytesN::from_array(env, &[0u8; 32]),
+            claim_lockup_seconds: 0,
+        }
+    }
+
+    #[test]
+    fn rejects_too_many_prizes() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(0);
+
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+
+        let factory = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+
+        // MAX_PRIZES + 1 tiers
+        let mut prizes = Vec::new(&env);
+        for _ in 0..(MAX_PRIZES + 1) {
+            prizes.push_back(1u32);
+        }
+
+        let config = base_config(&env, prizes);
+        let result = client.try_init(&factory, &admin, &creator, &config);
+
+        assert_eq!(result, Err(Ok(Error::TooManyPrizes)));
+    }
 }
