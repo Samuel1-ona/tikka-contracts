@@ -129,7 +129,8 @@ pub enum Error {
     NotInitialized = 43,
     Reentrancy = 44,
     TokenTransferFailed = 45,
-    MorePrizesThanTickets = 46,
+    DeadlinePassed = 46,
+    SlippageExceeded = 47,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -175,6 +176,19 @@ fn acquire_guard(env: &Env) -> Result<(), Error> {
     env.storage()
         .instance()
         .set(&DataKey::ReentrancyGuard, &true);
+    Ok(())
+}
+
+// Helper to enforce slippage and deadline guards for token swaps
+fn enforce_swap_guard(env: &Env, amount_out: i128, min_amount_out: i128, deadline: u64) -> Result<(), Error> {
+    // Check deadline
+    if env.ledger().timestamp() > deadline {
+        return Err(Error::DeadlinePassed);
+    }
+    // Check slippage (amount_out must be >= min_amount_out)
+    if amount_out < min_amount_out {
+        return Err(Error::SlippageExceeded);
+    }
     Ok(())
 }
 
