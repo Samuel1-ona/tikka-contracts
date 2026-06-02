@@ -111,10 +111,11 @@ pub enum Error {
     NotWinner = 14,
     ClaimTooEarly = 15,
     InvalidParameters = 21,
-    InvalidStatus = 22,
-    ContractPaused = 23,
-    InvalidStateTransition = 24,
-    RaffleExpired = 25,
+    InvalidQuantity = 22,
+    InvalidStatus = 23,
+    ContractPaused = 24,
+    InvalidStateTransition = 25,
+    RaffleExpired = 26,
     InsufficientTickets = 31,
     MultipleTicketsNotAllowed = 32,
     NoTicketsSold = 33,
@@ -381,6 +382,7 @@ impl Contract {
     }
 
     pub fn buy_tickets(env: Env, buyer: Address, quantity: u32) -> Result<u32, Error> {
+        require!(quantity > 0, Error::InvalidQuantity);
         let mut raffle = read_raffle(&env)?;
         buyer.require_auth();
         require_not_paused(&env)?;
