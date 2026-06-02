@@ -29,6 +29,9 @@ const ORACLE_TIMEOUT_LEDGERS: u32 = 200;
 pub const MAX_DESCRIPTION_LENGTH: u32 = 1000;
 pub const MAX_TICKETS_LIMIT: u32 = 100_000;
 pub const MIN_TICKET_PRICE: i128 = 10_000;
+/// Default and bounds for the claim lockup delay (#259).
+pub const DEFAULT_CLAIM_LOCKUP_SECONDS: u64 = 3_600;
+pub const MAX_CLAIM_LOCKUP_SECONDS: u64 = 604_800; // 7 days
 
 #[contract]
 pub struct Contract;
@@ -58,6 +61,8 @@ pub struct Raffle {
     pub tikka_token: Option<Address>,
     pub finalized_at: Option<u64>,
     pub winner_ticket_id: Option<u32>,
+    /// Seconds after finalization before winners may claim (#259).
+    pub claim_lockup_seconds: u64,
 }
 
 #[derive(Clone)]
@@ -111,6 +116,7 @@ pub enum Error {
     InsufficientTickets = 31,
     MultipleTicketsNotAllowed = 32,
     NoTicketsSold = 33,
+    NoActiveTickets = 46,
     TicketNotFound = 34,
     RaffleEnded = 35,
     ArithmeticOverflow = 41,
@@ -249,6 +255,17 @@ impl Contract {
             return Err(Error::InvalidParameters);
         }
 
+        // #259: claim_lockup_seconds must be within [0, MAX_CLAIM_LOCKUP_SECONDS].
+        // Zero is interpreted as "use the default".
+        let claim_lockup_seconds = if config.claim_lockup_seconds == 0 {
+            DEFAULT_CLAIM_LOCKUP_SECONDS
+        } else {
+            config.claim_lockup_seconds
+        };
+        if claim_lockup_seconds > MAX_CLAIM_LOCKUP_SECONDS {
+            return Err(Error::InvalidParameters);
+        }
+
         let raffle = Raffle {
             creator: creator.clone(),
             description: config.description.clone(),
@@ -273,6 +290,7 @@ impl Contract {
             tikka_token: config.tikka_token,
             finalized_at: None,
             winner_ticket_id: None,
+            claim_lockup_seconds,
         };
         write_raffle(&env, &raffle);
         env.storage().instance().set(&DataKey::Factory, &factory);
@@ -555,6 +573,13 @@ impl Contract {
             return Err(Error::InvalidStatus);
         }
 
+        // #259: enforce the configurable lockup delay.
+        if let Some(finalized_at) = raffle.finalized_at {
+            if env.ledger().timestamp() < finalized_at + raffle.claim_lockup_seconds {
+                return Err(Error::ClaimTooEarly);
+            }
+        }
+
         if tier_index as usize >= raffle.winners.len() {
             return Err(Error::InvalidParameters);
         }
@@ -671,6 +696,8 @@ impl Contract {
         acquire_guard(&env)?;
         let raffle = read_raffle(&env)?;
 
+        // #258: status check BEFORE require_auth to prevent double-spend on
+        // status transitions that occur between auth and the gate.
         if raffle.status != RaffleStatus::Cancelled && raffle.status != RaffleStatus::Failed {
             return Err(Error::InvalidStatus);
         }
@@ -789,6 +816,14 @@ fn do_finalize_with_seed(
     let total_tickets = get_ticket_count(env);
     if total_tickets == 0 {
         return Err(Error::NoTicketsSold);
+    }
+
+    // #256: Guard against all tickets being refunded after the draw window
+    // opened but before finalize runs, which would make the winners Vec empty
+    // and cause a panic on the winner_index lookup.
+    let active_count = raffle.tickets_sold;
+    if active_count == 0 {
+        return Err(Error::NoActiveTickets);
     }
 
     let selector = OracleSeedWinnerSelection::new(seed);
