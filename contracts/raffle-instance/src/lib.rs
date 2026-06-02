@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, token, xdr::ToXdr, Address, Bytes, BytesN,
-    Env, IntoVal, String, Symbol, Vec,
+    Env, String, Symbol, Vec,
 };
 
 mod randomness;
@@ -21,8 +21,9 @@ use crate::events::{
     DrawTriggered, PrizeClaimed, PrizeDeposited, PrizeRefunded, RaffleCancelled, RaffleCreated,
     RaffleFinalized, RaffleStatusChanged, RandomnessReceived,
     RandomnessRequested, TicketPurchased,
-    WinnerDrawn, RandomnessFallbackTriggered,
+    RandomnessFallbackTriggered,
     ContractPaused, ContractUnpaused,
+    VolumeRecorded,
 };
 
 const ORACLE_TIMEOUT_LEDGERS: u32 = 200;
@@ -388,16 +389,13 @@ impl Contract {
         write_raffle(&env, &raffle);
 
         if let Some(factory_address) = env.storage().instance().get::<_, Address>(&DataKey::Factory) {
-            env.invoke_contract::<()>(
-                &factory_address,
-                &Symbol::new(&env, "record_volume"),
-                (raffle.payment_token.clone(), total_price).into_val(&env),
-            );
-            env.invoke_contract::<()>(
-                &factory_address,
-                &Symbol::new(&env, "track_participant"),
-                (buyer.clone(),).into_val(&env),
-            );
+            VolumeRecorded {
+                factory: factory_address,
+                token: raffle.payment_token.clone(),
+                amount: total_price,
+                participant: buyer.clone(),
+                timestamp,
+            }.publish(&env);
         }
 
         let token_client = token::Client::new(&env, &raffle.payment_token);
@@ -801,14 +799,8 @@ fn do_finalize_with_seed(
         let ticket_id = winner_index + 1;
         let winner = get_ticket_owner(env, ticket_id).ok_or(Error::TicketNotFound)?;
         winners.push_back(winner.clone());
-
-        WinnerDrawn {
-            winner,
-            ticket_id: winner_index,
-            tier_index: i,
-            timestamp: env.ledger().timestamp(),
-        }.publish(&env);
     }
+    // Winners are batch-notified via RaffleFinalized below; no per-winner cross-contract call in loop.
 
     let mut claimed_winners = Vec::new(env);
     for _ in 0..raffle.prizes.len() {

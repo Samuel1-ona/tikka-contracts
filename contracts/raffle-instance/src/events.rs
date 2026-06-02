@@ -152,3 +152,15 @@ pub struct ContractUnpaused {
     pub unpaused_by: Address,
     pub timestamp: u64,
 }
+
+/// Emitted by buy_tickets in place of cross-contract record_volume / track_participant calls.
+/// The factory (or an off-chain indexer) should listen for this event to update protocol stats.
+#[derive(Clone)]
+#[contractevent]
+pub struct VolumeRecorded {
+    pub factory: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub participant: Address,
+    pub timestamp: u64,
+}
