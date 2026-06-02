@@ -18,7 +18,7 @@ use self::randomness::{
 };
 
 use crate::events::{
-    DrawTriggered, PrizeClaimed, PrizeDeposited, PrizeRefunded, RaffleCancelled, RaffleCreated,
+    PrizeClaimed, PrizeDeposited, PrizeRefunded, RaffleCancelled, RaffleCreated,
     RaffleFinalized, RaffleStatusChanged, RandomnessReceived,
     RandomnessRequested, TicketPurchased,
     WinnerDrawn, RandomnessFallbackTriggered,
@@ -33,6 +33,7 @@ pub const MIN_TICKET_PRICE: i128 = 10_000;
 #[contract]
 pub struct Contract;
 
+#[soroban_sdk::contracttype]
 #[derive(Clone)]
 pub struct Raffle {
     pub creator: Address,
@@ -60,6 +61,7 @@ pub struct Raffle {
     pub winner_ticket_id: Option<u32>,
 }
 
+#[soroban_sdk::contracttype]
 #[derive(Clone)]
 pub struct FairnessMetadata {
     pub seed: u64,
@@ -468,6 +470,16 @@ impl Contract {
             return Ok(());
         }
 
+        let old_status = raffle.status.clone();
+        raffle.status = RaffleStatus::Finalizing;
+        write_raffle(&env, &raffle);
+
+        RaffleStatusChanged {
+            old_status,
+            new_status: RaffleStatus::Finalizing,
+            timestamp: now,
+        }.publish(&env);
+
         let seed = build_internal_seed_u64(&env);
         self::do_finalize_with_seed(&env, raffle, seed, RandomnessType::Prng)
     }
@@ -555,7 +567,7 @@ impl Contract {
             return Err(Error::InvalidStatus);
         }
 
-        if tier_index as usize >= raffle.winners.len() {
+        if tier_index >= raffle.winners.len() {
             return Err(Error::InvalidParameters);
         }
 

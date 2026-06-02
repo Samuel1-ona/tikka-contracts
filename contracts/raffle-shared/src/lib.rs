@@ -11,6 +11,7 @@ pub enum RaffleStatus {
     Cancelled = 3,
     Failed = 4,
     Claimed = 5,
+    Finalizing = 6,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]

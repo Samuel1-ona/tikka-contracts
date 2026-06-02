@@ -287,6 +287,7 @@ Emitted whenever the raffle status transitions.
 - `Finalized = 3` - Winner determined, awaiting claim
 - `Claimed = 4` - Prize claimed by winner
 - `Cancelled = 5` - Raffle cancelled by creator
+- `Finalizing = 6` - Raffle in the process of finalizing (winner selection in progress)
 
 ---
 
