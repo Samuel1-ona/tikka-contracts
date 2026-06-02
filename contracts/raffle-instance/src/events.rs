@@ -5,6 +5,7 @@ use raffle_shared::{CancelReason, RandomnessSource, RandomnessType};
 #[derive(Clone)]
 #[contractevent]
 pub struct RaffleCreated {
+    pub raffle_id: Address,
     pub creator: Address,
     pub end_time: u64,
     pub max_tickets: u32,
@@ -60,6 +61,7 @@ pub struct DrawTriggered {
 #[contractevent]
 pub struct RandomnessRequested {
     pub oracle: Address,
+    pub request_id: u64,
     pub timestamp: u64,
 }
 
@@ -68,6 +70,7 @@ pub struct RandomnessRequested {
 pub struct RandomnessReceived {
     pub oracle: Address,
     pub seed: u64,
+    pub request_id: u64,
     pub timestamp: u64,
 }
 
