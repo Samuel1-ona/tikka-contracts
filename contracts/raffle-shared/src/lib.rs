@@ -1,0 +1,140 @@
+#![no_std]
+
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[contracttype]
+pub enum RaffleStatus {
+    Active = 0,
+    Drawing = 1,
+    Finalized = 2,
+    Cancelled = 3,
+    Failed = 4,
+    Claimed = 5,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[contracttype]
+pub enum CancelReason {
+    CreatorCancelled = 0,
+    AdminCancelled = 1,
+    OracleTimeout = 2,
+    MinTicketsNotMet = 3,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[contracttype]
+pub enum RandomnessSource {
+    Internal = 0,
+    External = 1,
+    CommitReveal = 2,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[contracttype]
+pub enum RandomnessType {
+    Prng = 0,
+    Vrf = 1,
+    Fallback = 2,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct RaffleConfig {
+    pub description: String,
+    pub end_time: u64,
+    pub max_tickets: u32,
+    pub min_tickets: u32,
+    pub allow_multiple: bool,
+    pub ticket_price: i128,
+    pub payment_token: Address,
+    pub prize_amount: i128,
+    pub prizes: Vec<u32>,
+    pub randomness_source: RandomnessSource,
+    pub oracle_address: Option<Address>,
+    pub protocol_fee_bp: u32,
+    pub treasury_address: Option<Address>,
+    pub swap_router: Option<Address>,
+    pub tikka_token: Option<Address>,
+    pub metadata_hash: BytesN<32>,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct Ticket {
+    pub id: u32,
+    pub owner: Address,
+    pub purchase_time: u64,
+    pub ticket_number: u32,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct FairnessData {
+    pub seed: u64,
+    pub randomness_source: RandomnessSource,
+    pub ticket_ids: Vec<u32>,
+    pub winning_ticket_indices: Vec<u32>,
+    pub draw_timestamp: u64,
+    pub draw_sequence: u32,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct PaginationParams {
+    pub limit: u32,
+    pub offset: u32,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct PageResultRaffles {
+    pub items: Vec<Address>,
+    pub total: u32,
+    pub has_more: bool,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct PageResultTickets {
+    pub items: Vec<Ticket>,
+    pub total: u32,
+    pub has_more: bool,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub enum AdminOp {
+    SetConfig(u32, Address),
+}
+
+pub const DEFAULT_PAGE_LIMIT: u32 = 100;
+pub const MAX_PAGE_LIMIT: u32 = 200;
+
+pub fn effective_limit(requested: u32) -> u32 {
+    if requested == 0 {
+        DEFAULT_PAGE_LIMIT
+    } else if requested > MAX_PAGE_LIMIT {
+        MAX_PAGE_LIMIT
+    } else {
+        requested
+    }
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct RandomnessRequest {
+    pub raffle_id: Address,
+    pub request_id: u64,
+    pub callback_address: Address,
+}
+
+#[soroban_sdk::contractclient(name = "RandomnessOracleClient")]
+pub trait RandomnessOracleTrait {
+    fn request_randomness(env: soroban_sdk::Env, request: RandomnessRequest);
+}
+
+#[soroban_sdk::contractclient(name = "RandomnessReceiverClient")]
+pub trait RandomnessReceiverTrait {
+    fn receive_randomness(env: soroban_sdk::Env, request_id: u64, random_seed: u64);
+}
