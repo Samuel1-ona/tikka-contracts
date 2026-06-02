@@ -118,6 +118,7 @@ pub enum Error {
     NotInitialized = 43,
     Reentrancy = 44,
     TokenTransferFailed = 45,
+    InvalidIndex = 46,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -559,15 +560,15 @@ impl Contract {
             return Err(Error::InvalidParameters);
         }
 
-        if raffle.winners.get(tier_index).unwrap() != winner {
+        if raffle.winners.get(tier_index).ok_or(Error::InvalidIndex)? != winner {
             return Err(Error::NotWinner);
         }
 
-        if raffle.claimed_winners.get(tier_index).unwrap() {
+        if raffle.claimed_winners.get(tier_index).ok_or(Error::InvalidIndex)? {
             return Err(Error::PrizeAlreadyClaimed);
         }
 
-        let prize_bp = raffle.prizes.get(tier_index).unwrap();
+        let prize_bp = raffle.prizes.get(tier_index).ok_or(Error::InvalidIndex)?;
         let amount = raffle.prize_amount.checked_mul(prize_bp as i128).ok_or(Error::ArithmeticOverflow)? / 10000;
 
         let fee = amount * (raffle.protocol_fee_bp as i128) / 10000;
@@ -797,7 +798,7 @@ fn do_finalize_with_seed(
     let mut winners = Vec::new(env);
 
     for i in 0..winning_ticket_ids.len() {
-        let winner_index = winning_ticket_ids.get(i).unwrap();
+        let winner_index = winning_ticket_ids.get(i).ok_or(Error::InvalidIndex)?;
         let ticket_id = winner_index + 1;
         let winner = get_ticket_owner(env, ticket_id).ok_or(Error::TicketNotFound)?;
         winners.push_back(winner.clone());
