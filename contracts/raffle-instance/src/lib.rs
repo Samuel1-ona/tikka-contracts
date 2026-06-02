@@ -29,6 +29,7 @@ const ORACLE_TIMEOUT_LEDGERS: u32 = 200;
 pub const MAX_DESCRIPTION_LENGTH: u32 = 1000;
 pub const MAX_TICKETS_LIMIT: u32 = 100_000;
 pub const MIN_TICKET_PRICE: i128 = 10_000;
+pub const CLAIM_LOCKUP_SECONDS: u64 = 3600; // 1 hour
 
 #[contract]
 pub struct Contract;
@@ -565,6 +566,13 @@ impl Contract {
 
         if raffle.claimed_winners.get(tier_index).unwrap() {
             return Err(Error::PrizeAlreadyClaimed);
+        }
+
+        // Verify finalized_at is Some and check 1-hour lockup
+        let finalized_at = raffle.finalized_at.ok_or(Error::InvalidStatus)?;
+        let current_time = env.ledger().timestamp();
+        if current_time < finalized_at + CLAIM_LOCKUP_SECONDS {
+            return Err(Error::ClaimTooEarly);
         }
 
         let prize_bp = raffle.prizes.get(tier_index).unwrap();
