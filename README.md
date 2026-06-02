@@ -116,7 +116,7 @@ flowchart TD
 
 ### **Core Contract**
 
-#### **`contracts/hello-world/src/lib.rs`**
+#### **`contracts/raffle-instance/src/lib.rs`**
 
 ```rust
 pub fn create_raffle(... ) -> u64;
@@ -238,13 +238,13 @@ stellar contract invoke ... -- \
 ### **Run Tests**
 
 ```bash
-cargo test -p hello-world
+cargo test -p raffle-instance
 ```
 
 ### **Build the Contract**
 
 ```bash
-cargo build -p hello-world
+cargo build -p raffle-instance
 ```
 
 ## 🛠️ Development
