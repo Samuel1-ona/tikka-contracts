@@ -240,6 +240,10 @@ impl Contract {
             return Err(Error::InvalidParameters);
         }
 
+        if config.protocol_fee_bp > 10000 {
+            return Err(Error::InvalidParameters);
+        }
+
         if config.randomness_source == RandomnessSource::External && config.oracle_address.is_none()
         {
             return Err(Error::InvalidParameters);
