@@ -207,6 +207,37 @@ fn build_internal_seed_u64(env: &Env) -> u64 {
     u64::from_be_bytes(bytes)
 }
 
+fn calculate_tier_prize(raffle: &Raffle, tier_index: u32) -> Result<i128, Error> {
+    let last_tier_index = raffle.prizes.len() - 1;
+
+    if tier_index == last_tier_index {
+        let mut allocated_before_last = 0i128;
+        for i in 0..last_tier_index {
+            let prize_bp = raffle.prizes.get(i).unwrap();
+            let amount = raffle
+                .prize_amount
+                .checked_mul(prize_bp as i128)
+                .ok_or(Error::ArithmeticOverflow)?
+                / 10000;
+            allocated_before_last = allocated_before_last
+                .checked_add(amount)
+                .ok_or(Error::ArithmeticOverflow)?;
+        }
+
+        return raffle
+            .prize_amount
+            .checked_sub(allocated_before_last)
+            .ok_or(Error::ArithmeticOverflow);
+    }
+
+    let prize_bp = raffle.prizes.get(tier_index).unwrap();
+    raffle
+        .prize_amount
+        .checked_mul(prize_bp as i128)
+        .ok_or(Error::ArithmeticOverflow)
+        .map(|amount| amount / 10000)
+}
+
 #[contractimpl]
 impl Contract {
     pub fn init(
@@ -635,8 +666,7 @@ impl Contract {
             return Err(Error::PrizeAlreadyClaimed);
         }
 
-        let prize_bp = raffle.prizes.get(tier_index).unwrap();
-        let amount = raffle.prize_amount.checked_mul(prize_bp as i128).ok_or(Error::ArithmeticOverflow)? / 10000;
+        let amount = calculate_tier_prize(&raffle, tier_index)?;
 
         let fee = amount * (raffle.protocol_fee_bp as i128) / 10000;
         let net_amount = amount - fee;
