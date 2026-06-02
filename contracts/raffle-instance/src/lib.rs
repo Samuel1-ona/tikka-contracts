@@ -118,6 +118,7 @@ pub enum Error {
     NotInitialized = 43,
     Reentrancy = 44,
     TokenTransferFailed = 45,
+    MorePrizesThanTickets = 46,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -789,6 +790,9 @@ fn do_finalize_with_seed(
     let total_tickets = get_ticket_count(env);
     if total_tickets == 0 {
         return Err(Error::NoTicketsSold);
+    }
+    if raffle.prizes.len() as u32 > total_tickets {
+        return Err(Error::MorePrizesThanTickets);
     }
 
     let selector = OracleSeedWinnerSelection::new(seed);
