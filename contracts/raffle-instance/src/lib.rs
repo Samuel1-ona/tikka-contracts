@@ -566,7 +566,7 @@ impl Contract {
 
         let token_client = token::Client::new(&env, &raffle.payment_token);
         let _ = token_client
-            .try_transfer(&buyer, &env.current_contract_address(), &total_price)
+            .try_transfer(&buyer, env.current_contract_address(), &total_price)
             .map_err(|_| Error::TokenTransferFailed)?;
 
         if protocol_fee > 0 {
