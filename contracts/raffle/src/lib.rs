@@ -126,7 +126,7 @@ fn require_registered_raffle(env: &Env, raffle_address: &Address) -> Result<(), 
 }
 
 fn maybe_create_checkpoint(env: &Env, raffle_count: u32) {
-    if raffle_count == 0 || raffle_count % CHECKPOINT_INTERVAL != 0 {
+    if raffle_count == 0 || !raffle_count.is_multiple_of(CHECKPOINT_INTERVAL) {
         return;
     }
 
@@ -161,7 +161,7 @@ fn maybe_create_checkpoint(env: &Env, raffle_count: u32) {
         ledger_timestamp,
         aggregate_hash: aggregate_hash.into(),
     }
-    .publish(&env);
+    .publish(env);
 }
 
 #[contractimpl]

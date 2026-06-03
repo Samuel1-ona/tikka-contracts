@@ -310,7 +310,7 @@ impl Contract {
         if config.prize_amount < config.ticket_price {
             return Err(Error::InvalidParameters);
         }
-        if config.prizes.len() == 0 {
+        if config.prizes.is_empty() {
             return Err(Error::InvalidParameters);
         }
         let mut total_prizes_bp = 0u32;
@@ -494,7 +494,7 @@ impl Contract {
             .checked_mul(raffle.protocol_fee_bp as i128)
             .ok_or(Error::ArithmeticOverflow)?
             / 10000;
-        let net_amount = total_price - protocol_fee;
+        let _net_amount = total_price - protocol_fee;
 
         for _ in 0..quantity {
             let ticket_id = next_ticket_id(&env);

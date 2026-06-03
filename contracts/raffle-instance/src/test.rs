@@ -18,7 +18,7 @@ fn test_oracle_fallback_with_ledger_delays() {
     let oracle = Address::generate(&env);
     let payment_token = Address::generate(&env);
 
-    let contract_id = env.register_contract(None, Contract);
+    let contract_id = env.register(None, Contract);
     let client = ContractClient::new(&env, &contract_id);
 
     // 2. Initialize Raffle with External Randomness
@@ -39,6 +39,7 @@ fn test_oracle_fallback_with_ledger_delays() {
         swap_router: None,
         tikka_token: None,
         metadata_hash: BytesN::from_array(&env, &[1; 32]),
+        claim_lockup_seconds: 0,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -55,17 +56,17 @@ fn test_oracle_fallback_with_ledger_delays() {
     assert_eq!(raffle.status, RaffleStatus::Drawing);
 
     // 6. Attempt fallback too early
-    let result = client.try_trigger_randomness_fallback(&creator);
+    let result = client.try_trigger_randomness_fallback(&creator, &true);
     assert_eq!(result.err(), Some(Ok(Error::FallbackTooEarly)));
 
     // 7. Simulate ledger delays
     env.ledger().with_mut(|l| {
-        l.sequence += ORACLE_TIMEOUT_LEDGERS + 1;
+        l.sequence_number += ORACLE_TIMEOUT_LEDGERS + 1;
         l.timestamp += 86400; // 1 day
     });
 
     // 8. Trigger fallback successfully
-    client.trigger_randomness_fallback(&creator);
+    client.trigger_randomness_fallback(&creator, &true);
 
     // 9. Verify finalized state
     let raffle_after = client.get_raffle();
