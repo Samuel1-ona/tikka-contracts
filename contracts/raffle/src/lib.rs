@@ -371,10 +371,10 @@ impl RaffleFactory {
             .ok_or(ContractError::TreasuryNotSet)?;
 
         let mut instances: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::RaffleInstances)
-            .unwrap();
+    .storage()
+    .persistent()
+    .get(&DataKey::RaffleInstances)
+    .unwrap_or_else(|| Vec::new(&env));
 
         let mut final_config = config;
         final_config.protocol_fee_bp = protocol_fee_bp;
