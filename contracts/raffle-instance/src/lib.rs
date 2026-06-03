@@ -61,6 +61,7 @@ fn bump_instance_ttl(env: &Env) {
 pub struct Contract;
 #[contracttype]
 #[derive(Clone)]
+#[contracttype]
 pub struct Raffle {
     pub creator: Address,
     pub description: String,
@@ -91,6 +92,7 @@ pub struct Raffle {
 
 #[contracttype]
 #[derive(Clone)]
+#[contracttype]
 pub struct FairnessMetadata {
     pub seed: u64,
     pub randomness_source: RandomnessSource,
@@ -516,9 +518,19 @@ impl Contract {
             return Err(Error::RaffleExpired);
         }
 
-        if raffle.tickets_sold + quantity > raffle.max_tickets {
-            return Err(Error::TicketsSoldOut);
-        }
+            if raffle.status != RaffleStatus::Active {
+                return Err(Error::RaffleInactive);
+            }
+            if !raffle.prize_deposited {
+                return Err(Error::InvalidStateTransition);
+            }
+            if raffle.end_time != 0 && env.ledger().timestamp() > raffle.end_time {
+                return Err(Error::RaffleExpired);
+            }
+            // Issue #161: Enforce minimum ticket price validation
+            if raffle.ticket_price < MIN_TICKET_PRICE {
+                return Err(Error::InvalidParameters);
+            }
 
         let current_count: u32 = env
             .storage()
@@ -609,16 +621,25 @@ impl Contract {
                 &Symbol::new(&env, "track_participant"),
                 (buyer.clone(),).into_val(&env),
             );
-        }
+            write_raffle(&env, &raffle);
 
         let token_client = token::Client::new(&env, &raffle.payment_token);
         let _ = token_client
             .try_transfer(&buyer, env.current_contract_address(), &total_price)
             .map_err(|_| Error::TokenTransferFailed)?;
 
-        if protocol_fee > 0 {
-            if let Some(treasury) = &raffle.treasury_address {
-                token_client.transfer(&env.current_contract_address(), treasury, &protocol_fee);
+            let token_client = token::Client::new(&env, &raffle.payment_token);
+            token_client
+                .try_transfer(&buyer, &env.current_contract_address(), &total_price)
+                .map_err(|_| Error::TokenTransferFailed)?;
+
+            TicketPurchased {
+                buyer: buyer.clone(),
+                ticket_ids,
+                quantity,
+                ticket_price: raffle.ticket_price,
+                total_paid: total_price,
+                timestamp,
             }
             let prev_fees: i128 = env
                 .storage()
@@ -642,7 +663,9 @@ impl Contract {
         }
         .publish(&env);
 
-        Ok(raffle.tickets_sold)
+        // Issue #159: Release reentrancy guard before returning
+        release_guard(&env);
+        result
     }
 
     pub fn transfer_ticket(env: Env, ticket_id: u32, new_owner: Address) -> Result<(), Error> {
@@ -711,7 +734,8 @@ impl Contract {
         let mut raffle = read_raffle(&env)?;
         raffle.creator.require_auth();
 
-        if raffle.status != RaffleStatus::Active && raffle.status != RaffleStatus::Drawing {
+        // Issue #166: Only allow finalization from Active state to prevent multiple calls
+        if raffle.status != RaffleStatus::Active {
             return Err(Error::InvalidStatus);
         }
 
