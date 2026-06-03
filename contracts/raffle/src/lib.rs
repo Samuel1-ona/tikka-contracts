@@ -259,12 +259,21 @@ impl RaffleFactory {
 
         match pending.op.clone() {
             AdminOp::SetConfig(protocol_fee_bp, treasury) => {
+                let old_treasury: Address = env.storage().persistent().get(&DataKey::Treasury).unwrap();
+
                 env.storage()
                     .persistent()
                     .set(&DataKey::ProtocolFeeBP, &protocol_fee_bp);
                 env.storage()
                     .persistent()
                     .set(&DataKey::Treasury, &treasury);
+
+                events::TreasuryChanged {
+                    old_treasury,
+                    new_treasury: treasury.clone(),
+                    changed_by: admin.clone(),
+                    timestamp: env.ledger().timestamp(),
+                }.publish(&env);
             }
         }
 

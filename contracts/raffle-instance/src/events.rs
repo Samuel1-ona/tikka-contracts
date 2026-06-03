@@ -177,3 +177,13 @@ pub struct EmergencyWithdrawn {
     pub token: Address,
     pub timestamp: u64,
 }
+
+#[derive(Clone)]
+#[contractevent]
+pub struct AdminChanged {
+    pub old_admin: Address,
+    pub new_admin: Address,
+    #[topic]
+    pub changed_by: Address,
+    pub timestamp: u64,
+}

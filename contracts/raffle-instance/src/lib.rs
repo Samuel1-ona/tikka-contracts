@@ -1258,13 +1258,17 @@ impl Contract {
     }
 
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .ok_or(Error::NotAuthorized)?;
-        admin.require_auth();
+        let old_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
+        old_admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &new_admin);
+
+        crate::events::AdminChanged {
+            old_admin,
+            new_admin: new_admin.clone(),
+            changed_by: old_admin.clone(),
+            timestamp: env.ledger().timestamp(),
+        }.publish(&env);
+
         Ok(())
     }
 }
