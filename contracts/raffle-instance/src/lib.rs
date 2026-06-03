@@ -28,6 +28,7 @@ use crate::events::{
 const ORACLE_TIMEOUT_LEDGERS: u32 = 200;
 pub const MAX_DESCRIPTION_LENGTH: u32 = 1000;
 pub const MAX_TICKETS_LIMIT: u32 = 100_000;
+pub const MAX_PRIZES: u32 = 100;
 pub const MIN_TICKET_PRICE: i128 = 10_000;
 pub const MAX_PRIZE_AMOUNT: i128 = 1_000_000_000_000_000_000_000; // 1e21
 /// Default and bounds for the claim lockup delay (#259).
@@ -136,6 +137,7 @@ pub enum Error {
     MorePrizesThanTickets = 50,
     ZeroPrize = 51,
     InvalidTokenAddress = 52,
+    TooManyPrizes = 53,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -333,6 +335,9 @@ impl Contract {
         }
         if config.prizes.is_empty() {
             return Err(Error::InvalidParameters);
+        }
+        if config.prizes.len() > MAX_PRIZES {
+            return Err(Error::TooManyPrizes);
         }
         let mut total_prizes_bp = 0u32;
         for prize_bp in config.prizes.iter() {
