@@ -1291,7 +1291,58 @@ impl Contract {
 
         Ok(())
     }
+
+    // Allow admin to update the payment token before prize is deposited
+    pub fn update_payment_token(env: Env, new_token: Address) -> Result<(), Error> {
+        // Only admin can perform this action
+        let _admin = require_admin(&env)?;
+        let mut raffle = read_raffle(&env)?;
+        if raffle.prize_deposited {
+            return Err(Error::PrizeConfigurationLocked);
+        }
+        raffle.payment_token = new_token.clone();
+        write_raffle(&env, &raffle);
+        // Emit an event (optional, not defined in existing events)
+        Ok(())
+    }
+    // Allow admin to update the tikka token before prize is deposited
+    pub fn update_tikka_token(env: Env, new_token: Address) -> Result<(), Error> {
+        let _admin = require_admin(&env)?;
+        let mut raffle = read_raffle(&env)?;
+        if raffle.prize_deposited {
+            return Err(Error::PrizeConfigurationLocked);
+        }
+        raffle.tikka_token = Some(new_token.clone());
+        write_raffle(&env, &raffle);
+        Ok(())
+    }
+
+    // Allow admin to update the swap router before prize is deposited
+    pub fn update_swap_router(env: Env, new_router: Address) -> Result<(), Error> {
+        let _admin = require_admin(&env)?;
+        let mut raffle = read_raffle(&env)?;
+        if raffle.prize_deposited {
+            return Err(Error::PrizeConfigurationLocked);
+        }
+        raffle.swap_router = Some(new_router.clone());
+        write_raffle(&env, &raffle);
+        Ok(())
+    }
+
+    // Allow admin to update the treasury address before prize is deposited
+    pub fn update_treasury_address(env: Env, new_treasury: Address) -> Result<(), Error> {
+        let _admin = require_admin(&env)?;
+        let mut raffle = read_raffle(&env)?;
+        if raffle.prize_deposited {
+            return Err(Error::PrizeConfigurationLocked);
+        }
+        raffle.treasury_address = Some(new_treasury.clone());
+        write_raffle(&env, &raffle);
+        Ok(())
+    }
+
 }
+
 
 fn do_finalize_with_seed(
     env: &Env,
