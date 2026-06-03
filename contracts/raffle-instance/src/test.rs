@@ -3,6 +3,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
+    token::{StellarAssetClient, TokenClient},
     Address, BytesN, Env,
 };
 
@@ -16,7 +17,12 @@ fn test_oracle_fallback_with_ledger_delays() {
     let admin = Address::generate(&env);
     let creator = Address::generate(&env);
     let oracle = Address::generate(&env);
-    let payment_token = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let payment_token = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let token_client = StellarAssetClient::new(&env, &payment_token);
+    token_client.mint(&creator, &100_000_000);
 
     #[allow(deprecated)]
     let contract_id = env.register_contract(None, Contract);
