@@ -1,9 +1,10 @@
-use soroban_sdk::{contractevent, Address, BytesN, String, Vec};
 use raffle_shared::{CancelReason, RandomnessSource, RandomnessType};
+use soroban_sdk::{contractevent, Address, BytesN, String, Vec};
 
 #[derive(Clone)]
 #[contractevent]
 pub struct RaffleCreated {
+    pub raffle_id: Address,
     pub creator: Address,
     pub end_time: u64,
     pub max_tickets: u32,
@@ -47,10 +48,11 @@ pub struct TicketPurchased {
     pub timestamp: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 #[contractevent]
 pub struct DrawTriggered {
-    pub triggered_by: Address,
+    pub caller: Address,
     pub total_tickets_sold: u32,
     pub timestamp: u64,
 }
@@ -75,6 +77,7 @@ pub struct RandomnessReceived {
 #[derive(Clone)]
 #[contractevent]
 pub struct RaffleFinalized {
+    pub raffle_id: Address,
     pub winners: Vec<Address>,
     pub winning_ticket_ids: Vec<u32>,
     pub total_tickets_sold: u32,
