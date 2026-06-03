@@ -85,7 +85,7 @@ pub enum ContractError {
     TimelockNotElapsed = 15,
     InvalidRaffleId = 16,
     RaffleNotEligible = 17,
-    TreasuryNotSet = 18,
+    ArithmeticOverflow = 18,
 }
 
 #[contract]
@@ -481,20 +481,15 @@ impl RaffleFactory {
             .unwrap_or(0)
     }
 
-    pub fn record_volume(
-        env: Env,
-        raffle_address: Address,
-        asset: Address,
-        amount: i128,
-    ) -> Result<(), ContractError> {
-        require_registered_raffle(&env, &raffle_address)?;
-
-        let mut total_volume: i128 = env
+    pub fn record_volume(env: Env, asset: Address, amount: i128) -> Result<(), ContractError> {
+        let total_volume: i128 = env
             .storage()
             .persistent()
             .get(&DataKey::TotalVolumePerAsset(asset.clone()))
             .unwrap_or(0);
-        total_volume += amount;
+        let total_volume = total_volume
+            .checked_add(amount)
+            .ok_or(ContractError::ArithmeticOverflow)?;
         env.storage()
             .persistent()
             .set(&DataKey::TotalVolumePerAsset(asset), &total_volume);
@@ -816,5 +811,18 @@ mod tests {
         env.mock_all_auths();
         let (client, admin, _treasury) = setup_factory(&env);
         assert_eq!(client.get_admin(), admin);
+    }
+
+    #[test]
+    fn test_record_volume_overflow() {
+        let env = Env::default();
+        let (client, _admin, _treasury) = setup_factory(&env);
+        let asset = Address::generate(&env);
+
+        assert_eq!(client.get_total_volume(&asset), 0);
+        assert_eq!(client.record_volume(&asset, &i128::MAX), Ok(()));
+        assert_eq!(client.get_total_volume(&asset), i128::MAX);
+        assert_eq!(client.record_volume(&asset, &1), Err(ContractError::ArithmeticOverflow));
+        assert_eq!(client.get_total_volume(&asset), i128::MAX);
     }
 }
