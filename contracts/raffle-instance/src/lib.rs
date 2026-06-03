@@ -135,6 +135,7 @@ pub enum Error {
     InvalidIndex = 49,
     MorePrizesThanTickets = 50,
     ZeroPrize = 51,
+    InvalidTokenAddress = 52,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -234,6 +235,14 @@ fn require_not_paused(env: &Env) -> Result<(), Error> {
     {
         return Err(Error::ContractPaused);
     }
+    Ok(())
+}
+
+fn validate_token_address(env: &Env, token_address: &Address) -> Result<(), Error> {
+    let token_client = token::Client::new(env, token_address);
+    token_client
+        .try_decimals()
+        .map_err(|_| Error::InvalidTokenAddress)?;
     Ok(())
 }
 
@@ -355,6 +364,9 @@ impl Contract {
         if config.metadata_hash == BytesN::from_array(&env, &[0u8; 32]) {
             return Err(Error::InvalidParameters);
         }
+
+        // Validate that the payment_token is a valid token contract
+        validate_token_address(&env, &config.payment_token)?;
 
         // #259: claim_lockup_seconds must be within [0, MAX_CLAIM_LOCKUP_SECONDS].
         // Zero is interpreted as "use the default".
