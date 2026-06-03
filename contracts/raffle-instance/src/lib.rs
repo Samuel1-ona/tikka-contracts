@@ -37,6 +37,9 @@ pub const DEFAULT_CLAIM_LOCKUP_SECONDS: u64 = 3_600;
 pub const MAX_CLAIM_LOCKUP_SECONDS: u64 = 604_800; // 7 days
 /// Emergency withdraw delay (seconds). Set to 90 days.
 pub const EMERGENCY_WITHDRAW_DELAY_SECONDS: u64 = 90 * 24 * 3600; // 7776000
+// ~30 days at 6s/ledger; bump when less than 7 days remain
+const RAFFLE_TTL_BUMP: u32 = 432_000;
+const RAFFLE_TTL_THRESHOLD: u32 = 100_800;
 
 #[contract]
 pub struct Contract;
@@ -144,13 +147,17 @@ pub enum Error {
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
     env.storage()
-        .instance()
+        .persistent()
         .get(&DataKey::Raffle)
         .ok_or(Error::NotInitialized)
 }
 
 fn write_raffle(env: &Env, raffle: &Raffle) {
-    env.storage().instance().set(&DataKey::Raffle, raffle);
+    env.storage().persistent().set(&DataKey::Raffle, raffle);
+    // Bump TTL on every write so raffle state lives as long as ticket data
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Raffle, RAFFLE_TTL_THRESHOLD, RAFFLE_TTL_BUMP);
 }
 
 fn get_ticket_owner(env: &Env, ticket_id: u32) -> Option<Address> {
@@ -161,11 +168,11 @@ fn get_ticket_owner(env: &Env, ticket_id: u32) -> Option<Address> {
 }
 
 fn acquire_guard(env: &Env) -> Result<(), Error> {
-    if env.storage().instance().has(&DataKey::ReentrancyGuard) {
+    if env.storage().persistent().has(&DataKey::ReentrancyGuard) {
         return Err(Error::Reentrancy);
     }
     env.storage()
-        .instance()
+        .persistent()
         .set(&DataKey::ReentrancyGuard, &true);
     Ok(())
 }
@@ -190,7 +197,7 @@ fn enforce_swap_guard(
 }
 
 fn release_guard(env: &Env) {
-    env.storage().instance().remove(&DataKey::ReentrancyGuard);
+    env.storage().persistent().remove(&DataKey::ReentrancyGuard);
 }
 
 struct Guard<'a> {
@@ -213,7 +220,7 @@ impl<'a> Drop for Guard<'a> {
 fn require_not_paused(env: &Env) -> Result<(), Error> {
     if env
         .storage()
-        .instance()
+        .persistent()
         .get(&DataKey::Paused)
         .unwrap_or(false)
     {
@@ -284,7 +291,7 @@ impl Contract {
         creator: Address,
         config: RaffleConfig,
     ) -> Result<(), Error> {
-        if env.storage().instance().has(&DataKey::Raffle) {
+        if env.storage().persistent().has(&DataKey::Raffle) {
             return Err(Error::AlreadyInitialized);
         }
 
@@ -393,8 +400,8 @@ impl Contract {
             claim_lockup_seconds,
         };
         write_raffle(&env, &raffle);
-        env.storage().instance().set(&DataKey::Factory, &factory);
-        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().persistent().set(&DataKey::Factory, &factory);
+        env.storage().persistent().set(&DataKey::Admin, &admin);
 
         RaffleCreated {
             raffle_id: env.current_contract_address(),
@@ -542,7 +549,7 @@ impl Contract {
 
         if let Some(factory_address) = env
             .storage()
-            .instance()
+            .persistent()
             .get::<_, Address>(&DataKey::Factory)
         {
             let contract_address = env.current_contract_address();
@@ -646,7 +653,7 @@ impl Contract {
         if raffle.randomness_source == RandomnessSource::External {
             let already: bool = env
                 .storage()
-                .instance()
+                .persistent()
                 .get(&DataKey::RandomnessRequested)
                 .unwrap_or(false);
             if already {
@@ -667,13 +674,13 @@ impl Contract {
             let request_id = u64::from_be_bytes(id_bytes);
 
             env.storage()
-                .instance()
+                .persistent()
                 .set(&DataKey::RandomnessRequested, &true);
             env.storage()
-                .instance()
+                .persistent()
                 .set(&DataKey::RandomnessRequestLedger, &env.ledger().sequence());
             env.storage()
-                .instance()
+                .persistent()
                 .set(&DataKey::RandomnessRequestId, &request_id);
 
             DrawTriggered {
@@ -727,7 +734,7 @@ impl Contract {
 
         let request_pending: bool = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::RandomnessRequested)
             .unwrap_or(false);
         if !request_pending {
@@ -737,7 +744,7 @@ impl Contract {
         // Verify request ID to prevent replay attacks
         let stored_request_id: u64 = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::RandomnessRequestId)
             .ok_or(Error::NoRandomnessRequest)?;
         if stored_request_id != request_id {
@@ -782,7 +789,7 @@ impl Contract {
 
         let request_pending: bool = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::RandomnessRequested)
             .unwrap_or(false);
         if !request_pending {
@@ -791,7 +798,7 @@ impl Contract {
 
         let request_ledger: u32 = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::RandomnessRequestLedger)
             .unwrap_or(0);
         if env.ledger().sequence() < request_ledger + ORACLE_TIMEOUT_LEDGERS {
@@ -925,7 +932,7 @@ impl Contract {
         recipient: Address,
         amount: i128,
     ) -> Result<(), Error> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
+        let admin: Address = env.storage().persistent().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
         admin.require_auth();
 
         let raffle = read_raffle(&env)?;
@@ -1030,7 +1037,7 @@ impl Contract {
             return Err(Error::PrizeNotDeposited);
         }
 
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
+        let admin: Address = env.storage().persistent().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
         if caller != raffle.creator && caller != admin {
             return Err(Error::NotAuthorized);
         }
@@ -1127,7 +1134,7 @@ impl Contract {
     pub fn get_fairness_data(env: Env) -> Result<FairnessData, Error> {
         let metadata: FairnessMetadata = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::RandomnessSeed)
             .ok_or(Error::InvalidStatus)?;
         let raffle = read_raffle(&env)?;
@@ -1150,7 +1157,7 @@ impl Contract {
     pub fn wipe_storage(env: Env) -> Result<(), Error> {
         let factory: Address = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::Factory)
             .ok_or(Error::NotAuthorized)?;
         factory.require_auth();
@@ -1164,7 +1171,7 @@ impl Contract {
         }
 
         // Wipe all storage
-        env.storage().instance().remove(&DataKey::Raffle);
+        env.storage().persistent().remove(&DataKey::Raffle);
         // ... (other keys)
         Ok(())
     }
@@ -1172,11 +1179,11 @@ impl Contract {
     pub fn pause(env: Env) -> Result<(), Error> {
         let factory: Address = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::Factory)
             .ok_or(Error::NotAuthorized)?;
         factory.require_auth();
-        env.storage().instance().set(&DataKey::Paused, &true);
+        env.storage().persistent().set(&DataKey::Paused, &true);
 
         ContractPaused {
             paused_by: factory,
@@ -1190,11 +1197,11 @@ impl Contract {
     pub fn unpause(env: Env) -> Result<(), Error> {
         let factory: Address = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::Factory)
             .ok_or(Error::NotAuthorized)?;
         factory.require_auth();
-        env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage().persistent().set(&DataKey::Paused, &false);
 
         ContractUnpaused {
             unpaused_by: factory,
@@ -1258,9 +1265,9 @@ impl Contract {
     }
 
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        let old_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
+        let old_admin: Address = env.storage().persistent().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
         old_admin.require_auth();
-        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().persistent().set(&DataKey::Admin, &new_admin);
 
         crate::events::AdminChanged {
             old_admin,
@@ -1328,7 +1335,7 @@ fn do_finalize_with_seed(
         draw_sequence: env.ledger().sequence(),
     };
     env.storage()
-        .instance()
+        .persistent()
         .set(&DataKey::RandomnessSeed, &fairness_metadata);
 
     raffle.status = RaffleStatus::Finalized;
@@ -1339,13 +1346,13 @@ fn do_finalize_with_seed(
 
     // Clear pending randomness state
     env.storage()
-        .instance()
+        .persistent()
         .remove(&DataKey::RandomnessRequested);
     env.storage()
-        .instance()
+        .persistent()
         .remove(&DataKey::RandomnessRequestId);
     env.storage()
-        .instance()
+        .persistent()
         .remove(&DataKey::RandomnessRequestLedger);
 
     RaffleFinalized {
