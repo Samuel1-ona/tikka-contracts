@@ -316,6 +316,9 @@ impl Contract {
         if config.ticket_price < MIN_TICKET_PRICE {
             return Err(Error::InvalidParameters);
         }
+        if config.prize_amount <= 0 {
+            return Err(Error::InvalidParameters);
+        }
         if config.prize_amount < config.ticket_price {
             return Err(Error::InvalidParameters);
         }
@@ -428,6 +431,12 @@ impl Contract {
 
         if raffle.prize_deposited {
             return Err(Error::PrizeAlreadyDeposited);
+        }
+
+        // Reject zero-value prizes to avoid zero-value transfers and a raffle
+        // that is marked as funded while holding no actual prize.
+        if raffle.prize_amount <= 0 {
+            return Err(Error::InvalidParameters);
         }
 
         let old_status = raffle.status.clone();
