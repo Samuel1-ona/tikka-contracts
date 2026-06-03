@@ -7,15 +7,13 @@ use soroban_sdk::{
     Address, BytesN, Env,
 };
 
-use crate::mock_factory::MockFactory;
-
 #[test]
 fn test_oracle_fallback_with_ledger_delays() {
     let env = Env::default();
     env.mock_all_auths();
 
     // 1. Setup factory, admin, creator
-    let factory = env.register(MockFactory, ());
+    let factory = Address::generate(&env);
     let admin = Address::generate(&env);
     let creator = Address::generate(&env);
     let oracle = Address::generate(&env);
@@ -51,6 +49,11 @@ fn test_oracle_fallback_with_ledger_delays() {
     };
 
     client.init(&factory, &admin, &creator, &config);
+
+    // Remove factory from storage so buy_tickets skips the factory code path
+    env.as_contract(&contract_id, || {
+        env.storage().instance().remove(&DataKey::Factory);
+    });
 
     // 3. Deposit prize and buy ticket
     client.deposit_prize();

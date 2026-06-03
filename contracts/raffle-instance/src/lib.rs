@@ -10,9 +10,6 @@ use soroban_sdk::{
 mod events;
 mod randomness;
 
-#[cfg(test)]
-mod mock_factory;
-
 use raffle_shared::{
     CancelReason, FairnessData, RaffleConfig, RaffleStatus, RandomnessSource, RandomnessType,
     Ticket,
