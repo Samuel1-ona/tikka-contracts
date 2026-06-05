@@ -20,10 +20,11 @@ use raffle_shared::{
 use self::randomness::{OracleSeedWinnerSelection, WinnerSelectionStrategy};
 
 use crate::events::{
-    ContractPaused, ContractUnpaused, EmergencyWithdrawn, FeesWithdrawn, PrizeClaimed,
-    PrizeDeposited, PrizeRefunded, RaffleCancelled, RaffleCreated, RaffleFinalized,
-    RaffleStatusChanged, RandomnessFallbackTriggered, RandomnessReceived, RandomnessRequested,
-    TicketPurchased, TicketRefunded, WinnerDrawn,
+    PrizeClaimed, PrizeDeposited, PrizeRefunded, RaffleCancelled, RaffleCreated,
+    RaffleFinalized, RaffleStatusChanged, RandomnessReceived,
+    RandomnessRequested, TicketPurchased,
+    WinnerDrawn, RandomnessFallbackTriggered,
+    ContractPaused, ContractUnpaused,
 };
 
 const ORACLE_TIMEOUT_LEDGERS: u32 = 200;
@@ -59,7 +60,8 @@ fn bump_instance_ttl(env: &Env) {
 
 #[contract]
 pub struct Contract;
-#[contracttype]
+
+#[soroban_sdk::contracttype]
 #[derive(Clone)]
 #[contracttype]
 pub struct Raffle {
@@ -97,7 +99,7 @@ pub struct Raffle {
     pub claim_lockup_seconds: u64,
 }
 
-#[contracttype]
+#[soroban_sdk::contracttype]
 #[derive(Clone)]
 #[contracttype]
 pub struct FairnessMetadata {
@@ -858,9 +860,13 @@ impl Contract {
             return Ok(());
         }
 
-        DrawTriggered {
-            caller: caller.clone(),
-            total_tickets_sold: raffle.tickets_sold,
+        let old_status = raffle.status.clone();
+        raffle.status = RaffleStatus::Finalizing;
+        write_raffle(&env, &raffle);
+
+        RaffleStatusChanged {
+            old_status,
+            new_status: RaffleStatus::Finalizing,
             timestamp: now,
         }.publish(&env);
 
@@ -1010,13 +1016,6 @@ impl Contract {
 
         if raffle.status != RaffleStatus::Finalized {
             return Err(Error::InvalidStatus);
-        }
-
-        // #259: enforce the configurable lockup delay.
-        if let Some(finalized_at) = raffle.finalized_at {
-            if env.ledger().timestamp() < finalized_at + raffle.claim_lockup_seconds {
-                return Err(Error::ClaimTooEarly);
-            }
         }
 
         if tier_index >= raffle.winners.len() {
