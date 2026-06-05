@@ -669,12 +669,13 @@ impl RaffleFactory {
 
     pub fn sync_admin(env: Env, instance_address: Address) -> Result<(), ContractError> {
         let admin = require_admin(&env)?;
-        env.invoke_contract::<()>(
+        env.try_invoke_contract::<(), ContractError>(
             &instance_address,
             &Symbol::new(&env, "set_admin"),
             (admin,).into_val(&env),
-        );
-        Ok(())
+        )
+        .map_err(|_| ContractError::InstanceInvocationFailed)?
+        .map_err(|_| ContractError::InstanceInvocationFailed)
     }
 
     pub fn pause_instance(env: Env, instance_address: Address) -> Result<(), ContractError> {
