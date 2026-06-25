@@ -47,6 +47,7 @@ pub struct Raffle {
     pub end_time: u64,
     pub no_deadline: bool,
     pub max_tickets: u32,
+    pub max_tickets_per_tx: u32,
     pub min_tickets: u32,
     pub allow_multiple: bool,
     pub ticket_price: i128,
@@ -142,6 +143,7 @@ pub enum Error {
     InvalidTicketRange = 55,
     InsufficientAccumulatedFees = 56,
     PrizeConfigurationLocked = 57,
+    ExceedsMaxTicketsPerTx = 58,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -320,6 +322,9 @@ impl Contract {
         if config.max_tickets < config.min_tickets {
             return Err(Error::InvalidTicketRange);
         }
+        if config.max_tickets_per_tx == 0 || config.max_tickets_per_tx > config.max_tickets {
+            return Err(Error::InvalidParameters);
+        }
 
         if config.ticket_price < MIN_TICKET_PRICE {
             return Err(Error::InvalidParameters);
@@ -387,6 +392,7 @@ impl Contract {
             end_time: config.end_time,
             no_deadline: config.no_deadline,
             max_tickets: config.max_tickets,
+            max_tickets_per_tx: config.max_tickets_per_tx,
             min_tickets: config.min_tickets,
             allow_multiple: config.allow_multiple,
             ticket_price: config.ticket_price,
@@ -483,6 +489,9 @@ impl Contract {
             return Err(Error::InvalidQuantity);
         }
         let mut raffle = read_raffle(&env)?;
+        if quantity > raffle.max_tickets_per_tx {
+            return Err(Error::ExceedsMaxTicketsPerTx);
+        }
         buyer.require_auth();
         require_not_paused(&env)?;
 
@@ -1509,6 +1518,7 @@ mod test {
             end_time: 0,
             no_deadline: true,
             max_tickets: 1,
+            max_tickets_per_tx: 1,
             min_tickets: 1,
             allow_multiple: true,
             ticket_price: MIN_TICKET_PRICE,
@@ -1542,5 +1552,56 @@ mod test {
         // Attacker authenticates fine (mock_all_auths) but is not the winner.
         let result = client.try_claim_prize(&attacker, &0u32);
         assert_eq!(result, Err(Ok(Error::NotWinner)));
+    }
+
+    #[test]
+    fn buy_tickets_rejects_quantity_above_per_tx_cap() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+
+        let factory = env.register(MockFactory, ());
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let buyer = Address::generate(&env);
+
+        let token_admin = Address::generate(&env);
+        let (token_addr, token_mint) = create_token(&env, &token_admin);
+        token_mint.mint(&creator, &1_000_000);
+        token_mint.mint(&buyer, &1_000_000);
+
+        let config = RaffleConfig {
+            description: String::from_str(&env, "Per-tx cap"),
+            end_time: 0,
+            no_deadline: true,
+            max_tickets: 100,
+            max_tickets_per_tx: 5,
+            min_tickets: 1,
+            allow_multiple: true,
+            ticket_price: MIN_TICKET_PRICE,
+            payment_token: token_addr.clone(),
+            prize_amount: MIN_TICKET_PRICE * 100,
+            prizes: vec![&env, 10000u32],
+            randomness_source: RandomnessSource::Internal,
+            oracle_address: None,
+            protocol_fee_bp: 0,
+            treasury_address: None,
+            swap_router: None,
+            tikka_token: None,
+            metadata_hash: BytesN::from_array(&env, &[5u8; 32]),
+            claim_lockup_seconds: 0,
+        };
+
+        client.init(&factory, &admin, &creator, &config);
+        client.deposit_prize();
+
+        assert_eq!(
+            client.try_buy_tickets(&buyer, &6),
+            Err(Ok(Error::ExceedsMaxTicketsPerTx))
+        );
+        assert_eq!(client.buy_tickets(&buyer, &5), 5);
     }
 }
