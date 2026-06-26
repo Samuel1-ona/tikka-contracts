@@ -206,6 +206,15 @@ pub struct ProtocolFeeUpdated {
 
 #[derive(Clone)]
 #[contractevent]
+pub struct SwapDeadlineUpdated {
+    pub old_deadline_seconds: u64,
+    pub new_deadline_seconds: u64,
+    pub updated_by: Address,
+    pub timestamp: u64,
+}
+
+#[derive(Clone)]
+#[contractevent]
 pub struct EmergencyWithdrawn {
     pub withdrawn_by: Address,
     pub to: Address,

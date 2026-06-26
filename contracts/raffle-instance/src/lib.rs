@@ -34,6 +34,9 @@ pub const MAX_PRIZE_AMOUNT: i128 = 1_000_000_000_000_000_000_000; // 1e21
 /// Default and bounds for the claim lockup delay (#259).
 pub const DEFAULT_CLAIM_LOCKUP_SECONDS: u64 = 3_600;
 pub const MAX_CLAIM_LOCKUP_SECONDS: u64 = 604_800; // 7 days
+/// Default and bounds for swap deadline (network congestion tolerance).
+pub const DEFAULT_SWAP_DEADLINE_SECONDS: u64 = 300; // 5 minutes
+pub const MAX_SWAP_DEADLINE_SECONDS: u64 = 3_600; // 1 hour
 /// Emergency withdraw delay (seconds). Set to 90 days.
 pub const EMERGENCY_WITHDRAW_DELAY_SECONDS: u64 = 90 * 24 * 3600; // 7776000
 
@@ -67,6 +70,9 @@ pub struct Raffle {
     pub finalized_at: Option<u64>,
     /// Seconds after finalization before winners may claim (#259).
     pub claim_lockup_seconds: u64,
+    /// Swap deadline window in seconds (added to current timestamp for token swaps).
+    /// Defaults to 300 (5 minutes) if zero.
+    pub swap_deadline_seconds: u64,
 }
 
 #[contracttype]
@@ -186,13 +192,16 @@ fn acquire_guard(env: &Env) -> Result<(), Error> {
 }
 
 // Helper to enforce slippage and deadline guards for token swaps
-#[allow(dead_code)]
+// Uses the raffle's configurable swap_deadline_seconds to calculate the deadline
 fn enforce_swap_guard(
     env: &Env,
+    raffle: &Raffle,
     amount_out: i128,
     min_amount_out: i128,
-    deadline: u64,
 ) -> Result<(), Error> {
+    // Calculate deadline based on current timestamp and raffle's configured deadline window
+    let deadline = env.ledger().timestamp() + raffle.swap_deadline_seconds;
+    
     // Check deadline
     if env.ledger().timestamp() > deadline {
         return Err(Error::DeadlinePassed);
@@ -381,6 +390,17 @@ impl Contract {
             return Err(Error::InvalidParameters);
         }
 
+        // Swap deadline must be within [0, MAX_SWAP_DEADLINE_SECONDS].
+        // Zero is interpreted as "use the default".
+        let swap_deadline_seconds = if config.swap_deadline_seconds == 0 {
+            DEFAULT_SWAP_DEADLINE_SECONDS
+        } else {
+            config.swap_deadline_seconds
+        };
+        if swap_deadline_seconds > MAX_SWAP_DEADLINE_SECONDS {
+            return Err(Error::InvalidParameters);
+        }
+
         let raffle = Raffle {
             creator: creator.clone(),
             description: config.description.clone(),
@@ -406,6 +426,7 @@ impl Contract {
             tikka_token: config.tikka_token,
             finalized_at: None,
             claim_lockup_seconds,
+            swap_deadline_seconds,
         };
         write_raffle(&env, &raffle);
         env.storage().instance().set(&DataKey::Factory, &factory);
@@ -1361,6 +1382,32 @@ impl Contract {
         ProtocolFeeUpdated {
             old_fee_bp,
             new_fee_bp,
+            updated_by: admin,
+            timestamp: env.ledger().timestamp(),
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    pub fn set_swap_deadline(env: Env, new_deadline_seconds: u64) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        if new_deadline_seconds > MAX_SWAP_DEADLINE_SECONDS {
+            return Err(Error::InvalidParameters);
+        }
+
+        let mut raffle = read_raffle(&env)?;
+        if raffle.tickets_sold > 0 {
+            return Err(Error::InvalidStatus);
+        }
+
+        let old_deadline_seconds = raffle.swap_deadline_seconds;
+        raffle.swap_deadline_seconds = new_deadline_seconds;
+        write_raffle(&env, &raffle);
+
+        SwapDeadlineUpdated {
+            old_deadline_seconds,
+            new_deadline_seconds,
             updated_by: admin,
             timestamp: env.ledger().timestamp(),
         }
