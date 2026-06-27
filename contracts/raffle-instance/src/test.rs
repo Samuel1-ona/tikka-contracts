@@ -309,3 +309,100 @@ fn test_race_condition_fix_buy_tickets_triggers_randomness() {
         Some(Ok(crate::Error::RandomnessAlreadyRequested))
     );
 }
+
+#[test]
+fn test_allow_multiple_false_single_ticket_per_buyer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // ARRANGE
+    let factory = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let buyer_a = Address::generate(&env);
+    let buyer_b = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let payment_token = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let token_client = StellarAssetClient::new(&env, &payment_token);
+    token_client.mint(&creator, &1_000_000);
+    token_client.mint(&buyer_a, &1_000_000);
+    token_client.mint(&buyer_b, &1_000_000);
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let config = RaffleConfig {
+        description: String::from_str(&env, "Test allow_multiple=false"),
+        end_time: 0,
+        no_deadline: true,
+        max_tickets: 10,
+        min_tickets: 1,
+        allow_multiple: false,
+        ticket_price: MIN_TICKET_PRICE,
+        payment_token: payment_token.clone(),
+        prize_amount: MIN_TICKET_PRICE * 10,
+        prizes: soroban_sdk::vec![&env, 10000],
+        randomness_source: RandomnessSource::Internal,
+        oracle_address: None,
+        protocol_fee_bp: 0,
+        treasury_address: None,
+        swap_router: None,
+        tikka_token: None,
+        metadata_hash: BytesN::from_array(&env, &[6; 32]),
+        claim_lockup_seconds: 0,
+    };
+
+    client.init(&factory, &admin, &creator, &config);
+    client.deposit_prize();
+
+    // ACT: Buyer A buys first ticket
+    client.buy_tickets(&buyer_a, &1);
+
+    // ASSERT: Buyer A has 1 ticket, tickets_sold = 1
+    let raffle = client.get_raffle();
+    assert_eq!(raffle.tickets_sold, 1);
+    let buyer_a_count: u32 = env
+        .as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .get(&crate::DataKey::TicketCount(buyer_a.clone()))
+                .unwrap_or(0)
+        });
+    assert_eq!(buyer_a_count, 1);
+
+    // ACT: Buyer A tries to buy another ticket (should fail)
+    let result = client.try_buy_tickets(&buyer_a, &1);
+    assert_eq!(
+        result.err(),
+        Some(Ok(crate::Error::MultipleTicketsNotAllowed))
+    );
+
+    // ASSERT: State unchanged
+    let raffle_after = client.get_raffle();
+    assert_eq!(raffle_after.tickets_sold, 1);
+    let buyer_a_count_after: u32 = env
+        .as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .get(&crate::DataKey::TicketCount(buyer_a.clone()))
+                .unwrap_or(0)
+        });
+    assert_eq!(buyer_a_count_after, 1);
+
+    // ACT: Buyer B buys a ticket (should succeed)
+    client.buy_tickets(&buyer_b, &1);
+
+    // ASSERT: Buyer B has 1 ticket, tickets_sold = 2
+    let raffle_final = client.get_raffle();
+    assert_eq!(raffle_final.tickets_sold, 2);
+    let buyer_b_count: u32 = env
+        .as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .get(&crate::DataKey::TicketCount(buyer_b.clone()))
+                .unwrap_or(0)
+        });
+    assert_eq!(buyer_b_count, 1);
+}
