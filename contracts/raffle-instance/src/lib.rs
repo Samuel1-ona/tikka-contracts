@@ -806,6 +806,18 @@ impl Contract {
         proof: BytesN<64>,
         request_id: u64,
     ) -> Result<Address, Error> {
+        // # SECURITY: DrawingAlreadyComplete guard — DrawingLock=false means either winner
+        // selection completed or the lock was never legitimately set; reject to prevent double
+        // winner write
+        let drawing_lock: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::DrawingLock)
+            .unwrap_or(false);
+        if !drawing_lock {
+            return Err(Error::DrawingAlreadyComplete);
+        }
+
         let raffle = read_raffle(&env)?;
 
         let oracle = match &raffle.oracle_address {
@@ -859,6 +871,17 @@ impl Contract {
         caller: Address,
         do_refund: bool,
     ) -> Result<(), Error> {
+        // # SECURITY: fast-path guard — if DrawingLock is true, another Drawing transition is
+        // already in progress; reject without reading further state
+        let drawing_lock: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::DrawingLock)
+            .unwrap_or(false);
+        if drawing_lock {
+            return Err(Error::DrawingAlreadyInProgress);
+        }
+
         caller.require_auth();
         let mut raffle = read_raffle(&env)?;
 
@@ -896,6 +919,20 @@ impl Contract {
         if do_refund {
             raffle.status = RaffleStatus::Cancelled;
             write_raffle(&env, &raffle);
+
+            // Clear pending randomness and DrawingLock when cancelling
+            env.storage()
+                .instance()
+                .remove(&DataKey::RandomnessRequested);
+            env.storage()
+                .instance()
+                .remove(&DataKey::RandomnessRequestId);
+            env.storage()
+                .instance()
+                .remove(&DataKey::RandomnessRequestLedger);
+            env.storage()
+                .instance()
+                .remove(&DataKey::DrawingLock);
 
             RaffleCancelled {
                 creator: raffle.creator.clone(),
@@ -1527,6 +1564,10 @@ fn do_finalize_with_seed(
     env.storage()
         .instance()
         .remove(&DataKey::RandomnessRequestLedger);
+    // # SECURITY: Clear DrawingLock LAST, after all winner state is committed
+    env.storage()
+        .instance()
+        .remove(&DataKey::DrawingLock);
 
     RaffleFinalized {
         raffle_id: env.current_contract_address(),
