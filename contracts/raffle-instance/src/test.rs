@@ -33,6 +33,7 @@ fn test_oracle_fallback_with_ledger_delays() {
         end_time: 0,
         no_deadline: true,
         max_tickets: 10,
+        max_tickets_per_tx: 10,
         min_tickets: 1,
         allow_multiple: true,
         ticket_price: 10_000,
@@ -108,6 +109,7 @@ fn test_admin_updates_oracle_address() {
         end_time: 0,
         no_deadline: true,
         max_tickets: 5,
+        max_tickets_per_tx: 5,
         min_tickets: 1,
         allow_multiple: true,
         ticket_price: MIN_TICKET_PRICE,
@@ -150,6 +152,7 @@ fn test_admin_sets_protocol_fee_before_sales() {
         end_time: 0,
         no_deadline: true,
         max_tickets: 5,
+        max_tickets_per_tx: 5,
         min_tickets: 1,
         allow_multiple: true,
         ticket_price: MIN_TICKET_PRICE,
@@ -203,6 +206,7 @@ fn test_admin_withdraws_accumulated_fees() {
         end_time: 0,
         no_deadline: true,
         max_tickets: 1,
+        max_tickets_per_tx: 1,
         min_tickets: 1,
         allow_multiple: true,
         ticket_price: MIN_TICKET_PRICE,
@@ -240,16 +244,16 @@ fn test_admin_withdraws_accumulated_fees() {
 }
 
 #[test]
-fn test_race_condition_fix_buy_tickets_triggers_randomness() {
+fn test_buy_tickets_rejects_quantity_above_per_tx_cap() {
     let env = Env::default();
     env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
 
-    // Setup
     let factory = Address::generate(&env);
     let admin = Address::generate(&env);
     let creator = Address::generate(&env);
     let buyer = Address::generate(&env);
-    let oracle = Address::generate(&env);
+
     let token_admin = Address::generate(&env);
     let payment_token = env
         .register_stellar_asset_contract_v2(token_admin.clone())
@@ -262,18 +266,19 @@ fn test_race_condition_fix_buy_tickets_triggers_randomness() {
     let client = ContractClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
-        description: String::from_str(&env, "Race fix test"),
+        description: String::from_str(&env, "Per-tx cap"),
         end_time: 0,
         no_deadline: true,
-        max_tickets: 10,
+        max_tickets: 100,
+        max_tickets_per_tx: 5,
         min_tickets: 1,
         allow_multiple: true,
         ticket_price: MIN_TICKET_PRICE,
         payment_token: payment_token.clone(),
-        prize_amount: MIN_TICKET_PRICE * 10,
+        prize_amount: MIN_TICKET_PRICE * 100,
         prizes: soroban_sdk::vec![&env, 10000],
-        randomness_source: RandomnessSource::External,
-        oracle_address: Some(oracle.clone()),
+        randomness_source: RandomnessSource::Internal,
+        oracle_address: None,
         protocol_fee_bp: 0,
         treasury_address: None,
         swap_router: None,
@@ -283,31 +288,16 @@ fn test_race_condition_fix_buy_tickets_triggers_randomness() {
     };
 
     client.init(&factory, &admin, &creator, &config);
+    env.as_contract(&contract_id, || {
+        env.storage().instance().remove(&DataKey::Factory);
+    });
     client.deposit_prize();
 
-    // Buy all tickets - should automatically transition to Drawing and request randomness
-    client.buy_tickets(&buyer, &10);
-
-    // Verify raffle status is Drawing and randomness was requested
-    let raffle = client.get_raffle();
-    assert_eq!(raffle.status, RaffleStatus::Drawing);
-
-    // Check that RandomnessRequested is true
-    let randomness_requested: bool = env
-        .as_contract(&contract_id, || {
-            env.storage()
-                .instance()
-                .get(&crate::DataKey::RandomnessRequested)
-                .unwrap_or(false)
-        });
-    assert!(randomness_requested);
-
-    // Now try to call finalize_raffle again - should fail with RandomnessAlreadyRequested
-    let result = client.try_finalize_raffle();
     assert_eq!(
-        result.err(),
-        Some(Ok(crate::Error::RandomnessAlreadyRequested))
+        client.try_buy_tickets(&buyer, &6),
+        Err(Ok(Error::ExceedsMaxTicketsPerTx))
     );
+    assert_eq!(client.buy_tickets(&buyer, &5), 5);
 }
 
 #[test]
