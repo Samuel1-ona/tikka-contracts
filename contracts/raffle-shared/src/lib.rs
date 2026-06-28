@@ -51,6 +51,8 @@ pub struct RaffleConfig {
     pub end_time: u64,
     pub no_deadline: bool,
     pub max_tickets: u32,
+    /// Maximum tickets a single address may purchase per transaction.
+    pub max_tickets_per_tx: u32,
     pub min_tickets: u32,
     pub allow_multiple: bool,
     pub ticket_price: i128,
