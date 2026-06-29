@@ -187,6 +187,20 @@ pub struct ContractUnpaused {
 
 #[derive(Clone)]
 #[contractevent]
+pub struct TicketSalesPaused {
+    pub paused_by: Address,
+    pub timestamp: u64,
+}
+
+#[derive(Clone)]
+#[contractevent]
+pub struct TicketSalesResumed {
+    pub resumed_by: Address,
+    pub timestamp: u64,
+}
+
+#[derive(Clone)]
+#[contractevent]
 pub struct TokensRescued {
     pub rescued_by: Address,
     pub token: Address,

@@ -22,7 +22,7 @@ use crate::events::{
     OracleAddressUpdated, PrizeClaimed, PrizeDeposited, PrizeRefunded, ProtocolFeeUpdated,
     RaffleCancelled, RaffleCreated, RaffleFinalized, RaffleFailed, RaffleStatusChanged,
     RandomnessFallbackTriggered, RandomnessReceived, RandomnessRequested, TicketPurchased,
-    TicketRefunded, TokensRescued, WinnerDrawn,
+    TicketRefunded, TicketSalesPaused, TicketSalesResumed, TokensRescued, WinnerDrawn,
 };
 
 const ORACLE_TIMEOUT_LEDGERS: u32 = 200;
@@ -74,6 +74,8 @@ pub struct Raffle {
     /// Swap deadline window in seconds (added to current timestamp for token swaps).
     /// Defaults to 300 (5 minutes) if zero.
     pub swap_deadline_seconds: u64,
+    /// When true, ticket purchases are blocked while the raffle remains Active.
+    pub ticket_sales_paused: bool,
 }
 
 #[contracttype]
@@ -544,6 +546,7 @@ impl Contract {
             finalized_at: None,
             claim_lockup_seconds,
             swap_deadline_seconds,
+            ticket_sales_paused: false,
         };
         write_raffle(&env, &raffle);
         env.storage().instance().set(&DataKey::Factory, &factory);
@@ -638,6 +641,9 @@ impl Contract {
 
         if raffle.status != RaffleStatus::Active {
             return Err(Error::RaffleInactive);
+        }
+        if raffle.ticket_sales_paused {
+            return Err(Error::ContractPaused);
         }
         if !raffle.prize_deposited {
             return Err(Error::InvalidStateTransition);
@@ -1555,6 +1561,64 @@ impl Contract {
             .unwrap_or(false)
     }
 
+    pub fn pause_ticket_sales(env: Env, caller: Address) -> Result<(), Error> {
+        caller.require_auth();
+        let mut raffle = read_raffle(&env)?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotAuthorized)?;
+        if caller != raffle.creator && caller != admin {
+            return Err(Error::NotAuthorized);
+        }
+        if raffle.status != RaffleStatus::Active {
+            return Err(Error::InvalidStatus);
+        }
+        raffle.ticket_sales_paused = true;
+        write_raffle(&env, &raffle);
+
+        TicketSalesPaused {
+            paused_by: caller,
+            timestamp: env.ledger().timestamp(),
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    pub fn resume_ticket_sales(env: Env, caller: Address) -> Result<(), Error> {
+        caller.require_auth();
+        let mut raffle = read_raffle(&env)?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotAuthorized)?;
+        if caller != raffle.creator && caller != admin {
+            return Err(Error::NotAuthorized);
+        }
+        if raffle.status != RaffleStatus::Active {
+            return Err(Error::InvalidStatus);
+        }
+        raffle.ticket_sales_paused = false;
+        write_raffle(&env, &raffle);
+
+        TicketSalesResumed {
+            resumed_by: caller,
+            timestamp: env.ledger().timestamp(),
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    pub fn is_ticket_sales_paused(env: Env) -> bool {
+        read_raffle(&env)
+            .map(|raffle| raffle.ticket_sales_paused)
+            .unwrap_or(false)
+    }
+
     /// Sweep tokens that were accidentally sent to this contract.
     /// The raffle's own payment_token cannot be swept while a prize is held in escrow,
     /// ensuring active raffle funds are never at risk.
@@ -1931,5 +1995,101 @@ mod test {
             Err(Ok(Error::ExceedsMaxTicketsPerTx))
         );
         assert_eq!(client.buy_tickets(&buyer, &5), 5);
+    }
+
+    fn setup_active_raffle(
+        env: &Env,
+    ) -> (
+        ContractClient<'_>,
+        Address,
+        Address,
+        Address,
+        Address,
+        token::StellarAssetClient<'_>,
+    ) {
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(env, &contract_id);
+
+        let factory = env.register(MockFactory, ());
+        let admin = Address::generate(env);
+        let creator = Address::generate(env);
+        let buyer = Address::generate(env);
+
+        let token_admin = Address::generate(env);
+        let (token_addr, token_mint) = create_token(env, &token_admin);
+        token_mint.mint(&creator, &1_000_000);
+        token_mint.mint(&buyer, &1_000_000);
+
+        let config = RaffleConfig {
+            description: String::from_str(env, "ticket sales pause"),
+            end_time: 0,
+            no_deadline: true,
+            max_tickets: 100,
+            max_tickets_per_tx: 10,
+            min_tickets: 1,
+            allow_multiple: true,
+            ticket_price: MIN_TICKET_PRICE,
+            payment_token: token_addr,
+            prize_amount: MIN_TICKET_PRICE * 100,
+            prizes: vec![env, 10000u32],
+            randomness_source: RandomnessSource::Internal,
+            oracle_address: None,
+            protocol_fee_bp: 0,
+            treasury_address: None,
+            swap_router: None,
+            tikka_token: None,
+            metadata_hash: BytesN::from_array(env, &[7u8; 32]),
+            claim_lockup_seconds: 0,
+        };
+
+        client.init(&factory, &admin, &creator, &config);
+        client.deposit_prize();
+
+        (client, admin, creator, buyer, factory, token_mint)
+    }
+
+    #[test]
+    fn pause_resume_ticket_sales_controls_buy_tickets() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let (client, _admin, creator, buyer, _factory, _token_mint) = setup_active_raffle(&env);
+
+        assert_eq!(client.get_raffle().status, RaffleStatus::Active);
+        assert!(!client.is_ticket_sales_paused());
+
+        client.pause_ticket_sales(&creator);
+        assert!(client.is_ticket_sales_paused());
+        assert_eq!(client.get_raffle().status, RaffleStatus::Active);
+        assert_eq!(
+            client.try_buy_tickets(&buyer, &1),
+            Err(Ok(Error::ContractPaused))
+        );
+
+        client.resume_ticket_sales(&creator);
+        assert!(!client.is_ticket_sales_paused());
+        assert_eq!(client.get_raffle().status, RaffleStatus::Active);
+        assert_eq!(client.buy_tickets(&buyer, &1), 1);
+    }
+
+    #[test]
+    fn admin_can_pause_and_resume_ticket_sales() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let (client, admin, _creator, buyer, _factory, _token_mint) = setup_active_raffle(&env);
+
+        client.pause_ticket_sales(&admin);
+        assert!(client.is_ticket_sales_paused());
+        assert_eq!(
+            client.try_buy_tickets(&buyer, &1),
+            Err(Ok(Error::ContractPaused))
+        );
+
+        client.resume_ticket_sales(&admin);
+        assert!(!client.is_ticket_sales_paused());
+        assert_eq!(client.buy_tickets(&buyer, &1), 1);
     }
 }
