@@ -21,8 +21,9 @@ use crate::events::{
     ContractPaused, ContractUnpaused, DrawTriggered, EmergencyWithdrawn, FeesWithdrawn,
     OracleAddressUpdated, PrizeClaimed, PrizeDeposited, PrizeRefunded, ProtocolFeeUpdated,
     RaffleCancelled, RaffleCreated, RaffleFailed, RaffleFinalized, RaffleStatusChanged,
-    RandomnessFallbackTriggered, RandomnessReceived, RandomnessRequested, TicketPurchased,
-    TicketRefunded, TicketSalesPaused, TicketSalesResumed, TokensRescued, WinnerDrawn,
+    RandomnessFallbackTriggered, RandomnessReceived, RandomnessRequested, SwapDeadlineUpdated,
+    TicketPurchased, TicketRefunded, TicketSalesPaused, TicketSalesResumed, TokensRescued,
+    WinnerDrawn,
 };
 
 const ORACLE_TIMEOUT_LEDGERS: u32 = 200;
@@ -109,6 +110,8 @@ pub enum DataKey {
     /// transfers: a ticket holder who committed and then transferred the
     /// ticket still has their entropy contribution recorded here.
     CommitEntry(u32),
+    /// Reentrancy guard for the drawing flow.
+    DrawingLock,
 }
 
 /// A single participant commit recorded during the commit phase of a
@@ -170,6 +173,11 @@ pub enum Error {
     InsufficientAccumulatedFees = 56,
     PrizeConfigurationLocked = 57,
     ExceedsMaxTicketsPerTx = 58,
+    DrawingAlreadyInProgress = 59,
+    InvalidStatusForDrawingTransition = 60,
+    DrawingAlreadyComplete = 61,
+    InvalidEndTime = 62,
+    InvalidAdminAddress = 63,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
