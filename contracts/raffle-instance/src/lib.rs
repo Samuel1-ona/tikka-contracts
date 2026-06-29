@@ -1913,7 +1913,6 @@ mod test {
             tikka_token: None,
             metadata_hash: BytesN::from_array(&env, &[1u8; 32]),
             claim_lockup_seconds: 0,
-            swap_deadline_seconds: 0, // => DEFAULT_CLAIM_LOCKUP_SECONDS (3600)
             swap_deadline_seconds: 0,
         };
 
