@@ -1,5 +1,6 @@
 import { TxSubmitterService } from './tx-submitter.service';
 import { KeyService } from '../keys/key.service';
+import { buildVrfProofMessage } from '../vrf/proof-message';
 
 /**
  * Integration test — skipped unless STELLAR_INTEGRATION_TEST=1 and env vars are set.
@@ -21,10 +22,9 @@ describe('TxSubmitterService integration', () => {
       }
 
       const randomSeed = BigInt(process.env.RANDOMNESS_SEED ?? '42');
-      const seedBytes = Buffer.alloc(8);
-      seedBytes.writeBigUInt64BE(randomSeed);
-      const proof = keyService.sign(seedBytes);
-      const publicKey = keyService.getKeypair().rawPublicKey();
+      const message = buildVrfProofMessage(raffleContract, BigInt(requestId), randomSeed);
+      const proof = keyService.sign(message);
+      const publicKey = keyService.getPublicKeyBytes();
 
       const submitter = new TxSubmitterService(keyService);
       const hash = await submitter.submitProvideRandomness({
