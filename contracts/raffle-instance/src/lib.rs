@@ -2523,4 +2523,75 @@ mod test {
         );
         assert!(replay.is_err());
     }
+
+    #[test]
+    fn rescue_tokens_blocked_for_payment_token_while_prize_deposited() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let (client, admin, _creator, _buyer, _factory, _token_mint) = setup_active_raffle(&env);
+        let raffle = client.get_raffle();
+        assert!(raffle.prize_deposited);
+
+        let result = client.try_rescue_tokens(
+            &raffle.payment_token,
+            &admin,
+            &raffle.prize_amount,
+        );
+        assert_eq!(result, Err(Ok(Error::InvalidParameters)));
+    }
+
+    #[test]
+    fn rescue_tokens_allowed_for_non_payment_token() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let (client, admin, _creator, _buyer, _factory, _token_mint) = setup_active_raffle(&env);
+
+        let token_b_admin = Address::generate(&env);
+        let (token_b, token_b_mint) = create_token(&env, &token_b_admin);
+        let stray_amount = 50_000i128;
+        token_b_mint.mint(&admin, &stray_amount);
+        token_b_mint.transfer(&admin, &client.address, &stray_amount);
+
+        let admin_balance_before = token::Client::new(&env, &token_b).balance(&admin);
+        client.rescue_tokens(&token_b, &admin, &stray_amount);
+        let admin_balance_after = token::Client::new(&env, &token_b).balance(&admin);
+        assert_eq!(admin_balance_after, admin_balance_before + stray_amount);
+    }
+
+    #[test]
+    fn rescue_tokens_allowed_for_payment_token_after_raffle_ends() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let (client, admin, _creator, buyer, _factory, _token_mint) = setup_active_raffle(&env);
+        let raffle = client.get_raffle();
+        let payment_token = raffle.payment_token.clone();
+        let prize_amount = raffle.prize_amount;
+
+        client.buy_tickets(&buyer, &1);
+        client.cancel_raffle(&raffle_shared::CancelReason::AdminCancelled);
+
+        let after_cancel = client.get_raffle();
+        assert_eq!(after_cancel.status, RaffleStatus::Cancelled);
+        assert!(after_cancel.prize_deposited);
+
+        let blocked = client.try_rescue_tokens(&payment_token, &admin, &prize_amount);
+        assert_eq!(blocked, Err(Ok(Error::InvalidParameters)));
+
+        client.refund_prize();
+        assert!(!client.get_raffle().prize_deposited);
+
+        let remaining = token::Client::new(&env, &payment_token).balance(&client.address);
+        assert!(remaining > 0);
+
+        let admin_balance_before = token::Client::new(&env, &payment_token).balance(&admin);
+        client.rescue_tokens(&payment_token, &admin, &remaining);
+        let admin_balance_after = token::Client::new(&env, &payment_token).balance(&admin);
+        assert_eq!(admin_balance_after, admin_balance_before + remaining);
+    }
 }
