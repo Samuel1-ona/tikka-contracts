@@ -67,7 +67,9 @@ pub struct RaffleConfig {
     pub prizes: Vec<u32>,
     pub randomness_source: RandomnessSource,
     pub oracle_address: Option<Address>,
-    /// Protocol fee in basis points (100 = 1%). Charged on ticket purchase only.
+    /// Protocol fee in basis points (100 = 1%).
+    /// Charged at two points: ticket purchase and prize claim.
+    /// See docs/FEE_MODEL.md for full fee model details.
     pub protocol_fee_bp: u32,
     pub treasury_address: Option<Address>,
     pub swap_router: Option<Address>,

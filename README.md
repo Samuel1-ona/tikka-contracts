@@ -283,6 +283,7 @@ See `CONTRIBUTING.md` for contribution guidelines and PR expectations.
 
 -   **Stellar Soroban**: https://developers.stellar.org/docs/build/smart-contracts/overview
 -   **Soroban Examples**: https://github.com/stellar/soroban-examples
+-   **Fee Model**: [Tikka Protocol Fee Model](docs/FEE_MODEL.md)
 
 ## 📄 License
 
@@ -293,12 +294,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 -   **Documentation**: Check our guides
 -   **Issues**: Report bugs and feature requests
 -   **Community**: Join our Discord for discussions
-
-
-// protocol_fee_bp: Basis points (1 bp = 0.01%). 
-// Must be <= 10_000 (100%). 
-// Example: 250 = 2.5%
-// Charged on ticket purchase only — winners receive the full prize amount.
 
 ---
 
