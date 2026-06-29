@@ -1,4 +1,5 @@
 import {
+  Account,
   Contract,
   Networks,
   rpc as SorobanRpc,
@@ -66,7 +67,7 @@ export class TxSubmitterService {
     const keypair = this.keyService.getKeypair();
     const account = await this.server.getAccount(keypair.publicKey());
     const sequence = this.sequenceCache ?? account.sequenceNumber();
-    const sourceAccount = { ...account, sequenceNumber: () => sequence };
+    const sourceAccount = new Account(account.accountId(), sequence);
 
     const contract = new Contract(params.raffleContract);
     const operation = contract.call(
@@ -123,10 +124,7 @@ export class TxSubmitterService {
   ): Promise<SorobanRpc.Api.GetTransactionResponse> {
     for (let i = 0; i < maxAttempts; i++) {
       const result = await this.server.getTransaction(hash);
-      if (
-        result.status !== SorobanRpc.Api.GetTransactionStatus.NOT_FOUND &&
-        result.status !== SorobanRpc.Api.GetTransactionStatus.PENDING
-      ) {
+      if (result.status !== SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
         return result;
       }
       await this.sleep(intervalMs);
