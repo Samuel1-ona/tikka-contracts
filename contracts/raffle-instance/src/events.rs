@@ -1,3 +1,4 @@
+use raffle_shared::{CancelReason, RandomnessSource, RandomnessType};
 use raffle_shared::{CancelReason, FailureReason, RandomnessSource, RandomnessType};
 use soroban_sdk::{contractevent, Address, BytesN, String, Vec};
 
@@ -43,6 +44,7 @@ pub struct TicketPurchased {
     pub ticket_ids: Vec<u32>,
     pub quantity: u32,
     pub ticket_price: i128,
+    pub effective_ticket_price: i128,
     pub total_paid: i128,
     pub protocol_fee: i128,
     pub timestamp: u64,
@@ -238,6 +240,15 @@ pub struct SwapDeadlineUpdated {
 
 #[derive(Clone)]
 #[contractevent]
+pub struct EndTimeExtended {
+    pub old_end_time: u64,
+    pub new_end_time: u64,
+    pub extended_by: Address,
+    pub timestamp: u64,
+}
+
+#[derive(Clone)]
+#[contractevent]
 pub struct EmergencyWithdrawn {
     pub withdrawn_by: Address,
     pub to: Address,
@@ -254,5 +265,21 @@ pub struct AdminChanged {
     pub new_admin: Address,
     #[topic]
     pub changed_by: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted once per ticket after an NFT receipt is successfully minted
+/// by the configured `nft_contract`.
+#[derive(Clone)]
+#[contractevent]
+pub struct TicketNftMinted {
+    /// The address that received the NFT (the ticket buyer).
+    pub recipient: Address,
+    /// The ticket ID within this raffle (1-indexed).
+    pub ticket_id: u32,
+    /// The raffle instance contract address (NFT namespace).
+    pub raffle_id: Address,
+    /// The NFT contract that performed the mint.
+    pub nft_contract: Address,
     pub timestamp: u64,
 }
