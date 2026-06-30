@@ -324,14 +324,28 @@ Emitted whenever the raffle status transitions between lifecycle states.
 | `6` | `PendingPrize` | Raffle created, awaiting prize deposit |
 | `0` | `Active` | Prize deposited, accepting ticket purchases |
 | `1` | `Drawing` | Ticket sales ended, winner selection in progress |
-| `7` | `Finalizing` | Raffle in the process of finalizing (winner selection in progress) |
 | `2` | `Finalized` | Winners determined, awaiting claims |
 | `5` | `Claimed` | All prizes claimed |
 | `3` | `Cancelled` | Raffle cancelled before finalization |
 | `4` | `Failed` | Raffle failed (e.g. zero tickets sold) |
 
+**State machine:** `Drawing` transitions atomically to `Finalized` once winner selection completes; there is no intermediate `Finalizing` state.
+
+```mermaid
+stateDiagram-v2
+    [*] --> PendingPrize
+    PendingPrize --> Active: deposit_prize
+    Active --> Drawing: sales end or sell-out
+    Drawing --> Finalized: finalize_raffle
+    Active --> Failed: end with zero tickets
+    PendingPrize --> Cancelled: cancel_raffle
+    Active --> Cancelled: cancel_raffle
+    Drawing --> Cancelled: cancel_raffle
+    Finalized --> Claimed: claim_prize
+```
+
 **Emitted by:** `deposit_prize`, `buy_tickets` (via `transition_to_drawing`), `finalize_raffle`, `claim_prize`
-**When:** Status changes between lifecycle states (e.g. `PendingPrize` → `Active`, `Active` → `Drawing`, `Finalized` → `Claimed`).
+**When:** Status changes between lifecycle states (e.g. `PendingPrize` → `Active`, `Active` → `Drawing`, `Drawing` → `Finalized`, `Finalized` → `Claimed`).
 
 ---
 
@@ -543,8 +557,8 @@ Emitted when a verified winner claims their prize.
 | `tier_index` | `u32` | Prize tier index being claimed (0-based) |
 | `payment_token` | `Address` | Token contract used for the payout |
 | `gross_amount` | `i128` | Total prize amount before any deductions |
-| `net_amount` | `i128` | Actual amount transferred to the winner after fees |
-| `platform_fee` | `i128` | Fee amount retained by the platform |
+| `net_amount` | `i128` | Amount transferred to the winner (equals gross; fees are charged at ticket purchase) |
+| `platform_fee` | `i128` | Always 0 — protocol fees are collected on ticket sales, not prize claims |
 | `claimed_at` | `u64` | Ledger timestamp of the claim |
 
 **Emitted by:** `claim_prize`

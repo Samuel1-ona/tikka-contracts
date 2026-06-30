@@ -26,8 +26,6 @@ pub enum RaffleStatus {
     Failed = 4,
     /// Finalized raffle where all winners have completed claims.
     Claimed = 5,
-    /// Transitional guard state while finalization logic executes.
-    Finalizing = 7,
 }
 
 /// Canonical reason explaining why a raffle entered `Cancelled`.
@@ -111,7 +109,7 @@ pub struct RaffleConfig {
     pub randomness_source: RandomnessSource,
     /// Optional oracle contract address for external randomness flows.
     pub oracle_address: Option<Address>,
-    /// Protocol fee in basis points (0..=10_000).
+    /// Protocol fee in basis points (100 = 1%). Charged on ticket purchase only.
     pub protocol_fee_bp: u32,
     /// Optional treasury recipient address for protocol fees.
     pub treasury_address: Option<Address>,
@@ -129,7 +127,18 @@ pub struct RaffleConfig {
     pub swap_deadline_seconds: u64,
 }
 
-/// One sold raffle ticket.
+impl RaffleConfig {
+    pub fn resolve_defaults(mut self) -> Self {
+        if self.claim_lockup_seconds == 0 {
+            self.claim_lockup_seconds = DEFAULT_CLAIM_LOCKUP_SECONDS;
+        }
+        if self.swap_deadline_seconds == 0 {
+            self.swap_deadline_seconds = DEFAULT_SWAP_DEADLINE_SECONDS;
+        }
+        self
+    }
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub struct Ticket {
@@ -209,6 +218,8 @@ pub enum AdminOp {
 pub const DEFAULT_PAGE_LIMIT: u32 = 100;
 /// Hard maximum page size accepted by query helpers.
 pub const MAX_PAGE_LIMIT: u32 = 200;
+pub const DEFAULT_CLAIM_LOCKUP_SECONDS: u64 = 3_600;
+pub const DEFAULT_SWAP_DEADLINE_SECONDS: u64 = 300;
 
 /// Returns a safe pagination limit clamped to supported bounds.
 pub fn effective_limit(requested: u32) -> u32 {
