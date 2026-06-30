@@ -928,7 +928,8 @@ impl RaffleFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::String;
+    use raffle_shared::{RandomnessSource, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT};
+    use soroban_sdk::{String, Vec as SdkVec};
 
     fn setup_factory(env: &Env) -> (RaffleFactoryClient<'_>, Address, Address) {
         let admin = Address::generate(env);
@@ -942,6 +943,95 @@ mod tests {
         client.set_creation_delay(&0u64);
 
         (client, admin, treasury)
+    }
+
+    fn test_raffle_config(env: &Env, payment_token: &Address) -> RaffleConfig {
+        RaffleConfig {
+            description: String::from_str(env, "Test Raffle"),
+            end_time: 0,
+            no_deadline: true,
+            max_tickets: 10,
+            max_tickets_per_tx: 10,
+            min_tickets: 1,
+            allow_multiple: true,
+            ticket_price: 10_000,
+            payment_token: payment_token.clone(),
+            prize_amount: 10_000,
+            prizes: SdkVec::from_array(env, [10_000u32]),
+            randomness_source: RandomnessSource::Internal,
+            oracle_address: None,
+            protocol_fee_bp: 0,
+            treasury_address: None,
+            swap_router: None,
+            tikka_token: None,
+            metadata_hash: BytesN::from_array(env, &[1u8; 32]),
+            claim_lockup_seconds: 0,
+            swap_deadline_seconds: 0,
+        }
+    }
+
+    fn create_raffles_via_factory(
+        env: &Env,
+        client: &RaffleFactoryClient<'_>,
+        admin: &Address,
+        treasury: &Address,
+        creator: &Address,
+        count: u32,
+    ) -> SdkVec<Address> {
+        use raffle_instance::ContractClient as RaffleInstanceClient;
+
+        let factory_address = client.address.clone();
+        let token_admin = Address::generate(env);
+        let payment_token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        let protocol_fee_bp: u32 = env.as_contract(&factory_address, || {
+            env.storage()
+                .persistent()
+                .get(&DataKey::ProtocolFeeBP)
+                .unwrap_or(0)
+        });
+
+        let mut addrs = SdkVec::new(env);
+        for _ in 0..count {
+            let mut config = test_raffle_config(env, &payment_token);
+            config.protocol_fee_bp = protocol_fee_bp;
+            config.treasury_address = Some(treasury.clone());
+
+            let raffle_address = env.register(raffle_instance::Contract, ());
+            RaffleInstanceClient::new(env, &raffle_address).init(
+                &factory_address,
+                admin,
+                creator,
+                &config,
+            );
+
+            env.as_contract(&factory_address, || {
+                let stable_id: u32 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::NextRaffleId)
+                    .unwrap_or(0u32);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::RaffleById(stable_id), &raffle_address);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::NextRaffleId, &(stable_id.saturating_add(1)));
+                let live_count: u32 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::RaffleCount)
+                    .unwrap_or(0u32)
+                    .saturating_add(1);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::RaffleCount, &live_count);
+            });
+
+            addrs.push_back(raffle_address);
+        }
+        addrs
     }
 
     #[test]
@@ -1257,6 +1347,106 @@ mod tests {
         assert_eq!(page.items.len(), 2u32);
         assert_eq!(page.items.get(0).unwrap(), addrs.get(0).unwrap());
         assert_eq!(page.items.get(1).unwrap(), addrs.get(2).unwrap());
+    }
+
+    #[test]
+    fn get_raffles_page_empty_list() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, _treasury) = setup_factory(&env);
+
+        let page = client.get_raffles_page(&PaginationParams {
+            limit: 10,
+            offset: 0,
+        });
+        assert_eq!(page.items.len(), 0u32);
+        assert_eq!(page.total, 0u32);
+        assert!(!page.has_more);
+    }
+
+    #[test]
+    fn get_raffles_page_first_page() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, _treasury) = setup_factory(&env);
+        let creator = Address::generate(&env);
+        create_raffles_via_factory(&env, &client, &_admin, &_treasury, &creator, 15);
+
+        let page = client.get_raffles_page(&PaginationParams {
+            limit: 10,
+            offset: 0,
+        });
+        assert_eq!(page.items.len(), 10u32);
+        assert_eq!(page.total, 15u32);
+        assert!(page.has_more);
+    }
+
+    #[test]
+    fn get_raffles_page_last_page() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, _treasury) = setup_factory(&env);
+        let creator = Address::generate(&env);
+        create_raffles_via_factory(&env, &client, &_admin, &_treasury, &creator, 15);
+
+        let page = client.get_raffles_page(&PaginationParams {
+            limit: 10,
+            offset: 10,
+        });
+        assert_eq!(page.items.len(), 5u32);
+        assert_eq!(page.total, 15u32);
+        assert!(!page.has_more);
+    }
+
+    #[test]
+    fn get_raffles_page_offset_beyond_total() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, _treasury) = setup_factory(&env);
+        let creator = Address::generate(&env);
+        create_raffles_via_factory(&env, &client, &_admin, &_treasury, &creator, 5);
+
+        let page = client.get_raffles_page(&PaginationParams {
+            limit: 10,
+            offset: 10,
+        });
+        assert_eq!(page.items.len(), 0u32);
+        assert_eq!(page.total, 5u32);
+        assert!(!page.has_more);
+    }
+
+    #[test]
+    fn get_raffles_page_limit_zero_uses_default() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, _treasury) = setup_factory(&env);
+        let creator = Address::generate(&env);
+        create_raffles_via_factory(&env, &client, &_admin, &_treasury, &creator, 150);
+
+        let page = client.get_raffles_page(&PaginationParams {
+            limit: 0,
+            offset: 0,
+        });
+        assert_eq!(page.items.len(), DEFAULT_PAGE_LIMIT);
+        assert_eq!(page.total, 150u32);
+        assert!(page.has_more);
+    }
+
+    #[test]
+    fn get_raffles_page_limit_above_max_is_clamped() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, _treasury) = setup_factory(&env);
+        let creator = Address::generate(&env);
+        create_raffles_via_factory(&env, &client, &_admin, &_treasury, &creator, 250);
+
+        let page = client.get_raffles_page(&PaginationParams {
+            limit: 999,
+            offset: 0,
+        });
+        assert_eq!(page.items.len(), MAX_PAGE_LIMIT);
+        assert_eq!(page.total, 250u32);
+        assert!(page.has_more);
     }
 
     #[test]
