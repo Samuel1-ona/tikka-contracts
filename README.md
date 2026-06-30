@@ -254,21 +254,23 @@ stellar contract invoke ... -- \
 ### **Prerequisites**
 
 -   Rust toolchain
--   Stellar CLI (optional for deployment)
+-   Stellar CLI v23.x, matching this workspace's Soroban SDK 23.x dependency
+-   Node.js 20.x for the oracle service in `oracle/`
 
 ### **Run Tests**
 
 ```bash
-cargo test -p raffle-factory
+cargo test -p raffle
 cargo test -p raffle-instance
+cargo test -p raffle-shared
 ```
 
 ### **Build the Contract**
 
 ```bash
+cargo build -p raffle
 cargo build -p raffle-instance
-cargo build -p raffle-factory
-cargo build -p raffle-instance
+cargo build -p raffle-shared
 ```
 
 ## 🛠️ Development
