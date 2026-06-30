@@ -92,6 +92,10 @@ pub trait WinnerSelectionStrategy {
 /// security caveat.
 #[allow(dead_code)]
 pub struct PrngWinnerSelection {
+    _timestamp: u64,
+    _sequence: u32,
+    raffle_id: Address,
+    tickets_sold: u32,
     pub timestamp: u64,
     pub sequence: u32,
     pub raffle_id: Address,
@@ -102,8 +106,8 @@ pub struct PrngWinnerSelection {
 impl PrngWinnerSelection {
     pub fn new(timestamp: u64, sequence: u32, raffle_id: Address, tickets_sold: u32) -> Self {
         Self {
-            timestamp,
-            sequence,
+            _timestamp: timestamp,
+            _sequence: sequence,
             raffle_id,
             tickets_sold,
         }
