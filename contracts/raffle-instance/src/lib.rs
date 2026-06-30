@@ -31,8 +31,8 @@ use crate::events::{
     OracleAddressUpdated, PrizeClaimed, PrizeDeposited, PrizeRefunded, ProtocolFeeUpdated,
     RaffleCancelled, RaffleCreated, RaffleFailed, RaffleFinalized, RaffleStatusChanged,
     RandomnessFallbackTriggered, RandomnessReceived, RandomnessRequested, SwapDeadlineUpdated,
-    TicketPurchased, TicketRefunded, TicketSalesPaused, TicketSalesResumed, TokensRescued,
-    WinnerDrawn,
+    TicketNftMinted, TicketPurchased, TicketRefunded, TicketSalesPaused, TicketSalesResumed,
+    TokensRescued, WinnerDrawn,
 };
 
 const ORACLE_TIMEOUT_LEDGERS: u32 = 200;
@@ -66,6 +66,9 @@ pub struct Raffle {
     pub allow_multiple: bool,
     pub ticket_price: i128,
     pub payment_token: Address,
+    /// The token used for prize deposit and claims.
+    /// Defaults to `payment_token` when not explicitly set by the creator.
+    pub prize_token: Address,
     pub prize_amount: i128,
     pub prizes: Vec<u32>,
     pub tickets_sold: u32,
@@ -207,9 +210,6 @@ fn require_admin(env: &Env) -> Result<Address, Error> {
     admin.require_auth();
     Ok(admin)
 }
-
-/// Maximum protocol fee in basis points (20%) for per-raffle admin updates.
-pub const MAX_PROTOCOL_FEE_BP: u32 = 2_000;
 
 fn get_ticket_owner(env: &Env, ticket_id: u32) -> Option<Address> {
     env.storage()
@@ -427,7 +427,7 @@ fn calculate_tier_prize(raffle: &Raffle, tier_index: u32) -> Result<i128, Error>
 }
 
 #[contractimpl]
-impl Contract {
+impl RaffleInstance {
     pub fn init(
         env: Env,
         factory: Address,
@@ -513,6 +513,19 @@ impl Contract {
         // Validate that the payment_token is a valid token contract
         validate_token_address(&env, &config.payment_token)?;
 
+        // Validate prize_token if it differs from payment_token.
+        if let Some(ref pt) = config.prize_token {
+            if *pt != config.payment_token {
+                validate_token_address(&env, pt)?;
+            }
+        }
+
+        // Resolve the prize token: use the explicit override, or fall back to payment_token.
+        let prize_token = config
+            .prize_token
+            .clone()
+            .unwrap_or_else(|| config.payment_token.clone());
+
         // Resolve default values for fields that use 0 as "use default"
         let config = config.resolve_defaults();
 
@@ -545,6 +558,7 @@ impl Contract {
             allow_multiple: config.allow_multiple,
             ticket_price: config.ticket_price,
             payment_token: config.payment_token.clone(),
+            prize_token: prize_token.clone(),
             prize_amount: config.prize_amount,
             prizes: config.prizes.clone(),
             tickets_sold: 0,
@@ -603,7 +617,7 @@ impl Contract {
 
         // Move tokens first. If the transfer fails we want the contract state
         // (prize_deposited flag, raffle.status) to remain untouched.
-        let token_client = token::Client::new(&env, &raffle.payment_token);
+        let token_client = token::Client::new(&env, &raffle.prize_token);
         let contract_address = env.current_contract_address();
 
         let _ = token_client
@@ -878,8 +892,8 @@ impl Contract {
         }
 
         TicketPurchased {
-            buyer,
-            ticket_ids,
+            buyer: buyer.clone(),
+            ticket_ids: ticket_ids.clone(),
             quantity,
             ticket_price: raffle.ticket_price,
             effective_ticket_price: effective_price,
@@ -888,6 +902,26 @@ impl Contract {
             timestamp,
         }
         .publish(&env);
+
+        // NFT minting: issue an on-chain NFT receipt for each ticket purchased.
+        // This is best-effort — a failing NFT contract panics the whole call, so
+        // the NFT contract is assumed to be trusted and correctly implemented.
+        if let Some(ref nft_addr) = raffle.nft_contract {
+            let nft_client = NftTicketClient::new(&env, nft_addr);
+            let raffle_id = env.current_contract_address();
+            for i in 0..ticket_ids.len() {
+                let tid = ticket_ids.get(i).unwrap();
+                nft_client.mint(&buyer, &tid, &raffle_id);
+                TicketNftMinted {
+                    recipient: buyer.clone(),
+                    ticket_id: tid,
+                    raffle_id: raffle_id.clone(),
+                    nft_contract: nft_addr.clone(),
+                    timestamp,
+                }
+                .publish(&env);
+            }
+        }
 
         Ok(raffle.tickets_sold)
     }
@@ -1202,7 +1236,7 @@ impl Contract {
         }
         write_raffle(&env, &raffle);
 
-        let token_client = token::Client::new(&env, &raffle.payment_token);
+        let token_client = token::Client::new(&env, &raffle.prize_token);
         let _ = token_client
             .try_transfer(&env.current_contract_address(), &winner, &amount)
             .map_err(|_| Error::TokenTransferFailed)?;
@@ -1210,7 +1244,7 @@ impl Contract {
         PrizeClaimed {
             winner,
             tier_index,
-            payment_token: raffle.payment_token.clone(),
+            payment_token: raffle.prize_token.clone(),
             gross_amount: amount,
             net_amount: amount,
             platform_fee: 0,
@@ -1361,7 +1395,7 @@ impl Contract {
         PrizeRefunded {
             creator: raffle.creator.clone(),
             amount: raffle.prize_amount,
-            token: raffle.payment_token.clone(),
+            token: raffle.prize_token.clone(),
             timestamp: env.ledger().timestamp(),
         }
         .publish(&env);
@@ -1423,7 +1457,7 @@ impl Contract {
         raffle.status = RaffleStatus::Cancelled;
         write_raffle(&env, &raffle);
 
-        let token_client = token::Client::new(&env, &raffle.payment_token);
+        let token_client = token::Client::new(&env, &raffle.prize_token);
         token_client.transfer(
             &env.current_contract_address(),
             &raffle.creator,
@@ -1434,7 +1468,7 @@ impl Contract {
             withdrawn_by: caller,
             to: raffle.creator.clone(),
             amount: raffle.prize_amount,
-            token: raffle.payment_token.clone(),
+            token: raffle.prize_token.clone(),
             timestamp: env.ledger().timestamp(),
         }
         .publish(&env);
@@ -1785,10 +1819,13 @@ impl Contract {
             return Err(Error::InvalidParameters);
         }
 
-        // Protect active escrow: block sweeping the raffle payment token while
-        // the prize is deposited (i.e. the escrow is live).
+        // Protect active escrow: block sweeping the prize token while the prize
+        // is deposited. Also block the payment token if it equals the prize token
+        // to prevent draining the fee pool via a mis-directed rescue.
         if let Ok(raffle) = read_raffle(&env) {
-            if token == raffle.payment_token && raffle.prize_deposited {
+            if raffle.prize_deposited
+                && (token == raffle.prize_token || token == raffle.payment_token)
+            {
                 return Err(Error::InvalidParameters);
             }
         }
@@ -1939,8 +1976,8 @@ mod test {
         env.mock_all_auths();
         env.ledger().set_timestamp(1_000);
 
-        let contract_id = env.register(Contract, ());
-        let client = ContractClient::new(&env, &contract_id);
+        let contract_id = env.register(RaffleInstance, ());
+        let client = RaffleInstanceClient::new(&env, &contract_id);
 
         // Players
         let factory = env.register(MockFactory, ());
@@ -2219,8 +2256,8 @@ mod test {
         env.mock_all_auths();
         env.ledger().set_timestamp(1_000);
 
-        let contract_id = env.register(Contract, ());
-        let client = ContractClient::new(&env, &contract_id);
+        let contract_id = env.register(RaffleInstance, ());
+        let client = RaffleInstanceClient::new(&env, &contract_id);
 
         let factory = env.register(MockFactory, ());
         let admin = Address::generate(&env);
@@ -2255,6 +2292,8 @@ mod test {
             metadata_hash: BytesN::from_array(&env, &[9u8; 32]),
             claim_lockup_seconds: 0,
             swap_deadline_seconds: 0,
+            prize_token: None,
+            nft_contract: None,
         };
 
         client.init(&factory, &admin, &creator, &config);
@@ -2309,8 +2348,8 @@ mod test {
         env.mock_all_auths();
         env.ledger().set_timestamp(1_000);
 
-        let contract_id = env.register(Contract, ());
-        let client = ContractClient::new(&env, &contract_id);
+        let contract_id = env.register(RaffleInstance, ());
+        let client = RaffleInstanceClient::new(&env, &contract_id);
 
         let factory = env.register(MockFactory, ());
         let admin = Address::generate(&env);
@@ -2342,6 +2381,8 @@ mod test {
             metadata_hash: BytesN::from_array(&env, &[3u8; 32]),
             claim_lockup_seconds: 0,
             swap_deadline_seconds: 0,
+            prize_token: None,
+            nft_contract: None,
         };
 
         client.init(&factory, &admin, &creator, &config);
@@ -2373,8 +2414,8 @@ mod test {
         env.mock_all_auths();
         env.ledger().set_timestamp(1_000);
 
-        let contract_id = env.register(Contract, ());
-        let client = ContractClient::new(&env, &contract_id);
+        let contract_id = env.register(RaffleInstance, ());
+        let client = RaffleInstanceClient::new(&env, &contract_id);
 
         let factory = env.register(MockFactory, ());
         let admin = Address::generate(&env);
@@ -2407,6 +2448,8 @@ mod test {
             metadata_hash: BytesN::from_array(&env, &[4u8; 32]),
             claim_lockup_seconds: 0,
             swap_deadline_seconds: 0,
+            prize_token: None,
+            nft_contract: None,
         };
 
         client.init(&factory, &admin, &creator, &config);
@@ -2466,6 +2509,8 @@ mod test {
             metadata_hash: BytesN::from_array(env, &[5u8; 32]),
             claim_lockup_seconds: 0,
             swap_deadline_seconds: 0,
+            prize_token: None,
+            nft_contract: None,
         };
 
         client.init(&factory, &admin, &creator, &config);

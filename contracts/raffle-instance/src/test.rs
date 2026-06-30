@@ -37,8 +37,8 @@ fn test_oracle_fallback_with_ledger_delays() {
     let token_client = StellarAssetClient::new(&env, &payment_token);
     token_client.mint(&creator, &100_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     // 2. Initialize Raffle with External Randomness
     let config = RaffleConfig {
@@ -122,8 +122,8 @@ fn test_admin_updates_oracle_address() {
     let oracle = Address::generate(&env);
     let new_oracle = Address::generate(&env);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Oracle migration"),
@@ -171,8 +171,8 @@ fn non_winner_cannot_claim() {
     env.mock_all_auths();
     env.ledger().set_timestamp(1_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Fee update"),
@@ -547,8 +547,8 @@ fn test_refund_ticket_after_cancel() {
     let token_client = StellarAssetClient::new(&env, &payment_token);
     token_client.mint(&creator, &1_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Test"),
@@ -650,8 +650,8 @@ fn emergency_withdraw_fails_for_no_deadline_raffle_before_timeout() {
     let token_client = StellarAssetClient::new(&env, &payment_token);
     token_client.mint(&creator, &1_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let end_time = 5_000u64;
     let config = RaffleConfig {
@@ -860,6 +860,8 @@ fn emergency_withdraw_fails_if_prize_not_deposited() {
         metadata_hash: BytesN::from_array(&env, &[5; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);

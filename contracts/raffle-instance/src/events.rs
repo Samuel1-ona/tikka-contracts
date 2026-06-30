@@ -267,3 +267,19 @@ pub struct AdminChanged {
     pub changed_by: Address,
     pub timestamp: u64,
 }
+
+/// Emitted once per ticket after an NFT receipt is successfully minted
+/// by the configured `nft_contract`.
+#[derive(Clone)]
+#[contractevent]
+pub struct TicketNftMinted {
+    /// The address that received the NFT (the ticket buyer).
+    pub recipient: Address,
+    /// The ticket ID within this raffle (1-indexed).
+    pub ticket_id: u32,
+    /// The raffle instance contract address (NFT namespace).
+    pub raffle_id: Address,
+    /// The NFT contract that performed the mint.
+    pub nft_contract: Address,
+    pub timestamp: u64,
+}

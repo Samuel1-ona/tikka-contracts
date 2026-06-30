@@ -1,6 +1,8 @@
 #![no_std]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
+pub mod constants;
+
 use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 /// Lifecycle state of a raffle instance.
@@ -263,4 +265,28 @@ pub trait RandomnessOracleTrait {
 pub trait RandomnessReceiverTrait {
     /// Delivers a randomness response to the callback contract.
     fn receive_randomness(env: soroban_sdk::Env, request_id: u64, random_seed: u64);
+}
+
+/// Cross-contract interface for an NFT ticket contract.
+///
+/// The raffle-instance calls `mint` on this contract immediately after a
+/// successful ticket purchase.  The NFT contract is responsible for its own
+/// authorisation model; the raffle-instance supplies the raffle's own address
+/// as the `minter` so the NFT contract can restrict minting to known raffle
+/// contracts.
+///
+/// Parameters
+/// ----------
+/// * `recipient`  – the address that receives the NFT (the ticket buyer).
+/// * `ticket_id`  – the unique ticket ID within this raffle (1-indexed, u32).
+/// * `raffle_id`  – the raffle instance contract address, used as a namespace
+///                  so a single NFT contract can serve multiple raffles.
+#[soroban_sdk::contractclient(name = "NftTicketClient")]
+pub trait NftTicketTrait {
+    fn mint(
+        env: soroban_sdk::Env,
+        recipient: Address,
+        ticket_id: u32,
+        raffle_id: Address,
+    );
 }
