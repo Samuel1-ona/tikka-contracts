@@ -104,27 +104,8 @@ pub enum ContractError {
 #[contract]
 pub struct RaffleFactory;
 
-fn require_admin(env: &Env) -> Result<Address, ContractError> {
-    let admin: Address = env
-        .storage()
-        .persistent()
-        .get(&DataKey::Admin)
-        .ok_or(ContractError::NotAuthorized)?;
-    admin.require_auth();
-    Ok(admin)
-}
-
-fn require_factory_not_paused(env: &Env) -> Result<(), ContractError> {
-    if env
-        .storage()
-        .instance()
-        .get(&DataKey::Paused)
-        .unwrap_or(false)
-    {
-        return Err(ContractError::ContractPaused);
-    }
-    Ok(())
-}
+raffle_shared::impl_require_admin!(ContractError, ContractError::NotAuthorized);
+raffle_shared::impl_require_not_paused!(ContractError, ContractError::ContractPaused, require_factory_not_paused);
 
 fn maybe_create_checkpoint(env: &Env, raffle_count: u32) {
     if raffle_count == 0 || !raffle_count.is_multiple_of(CHECKPOINT_INTERVAL) {
@@ -1278,5 +1259,36 @@ mod tests {
             client.try_clean_old_raffle(&1u32),
             Err(Ok(ContractError::InvalidRaffleId))
         );
+    }
+
+    #[test]
+    fn execute_config_change_fails_before_timelock_elapses() {
+        let env = Env::default();
+        let (client, _admin, treasury) = setup_factory(&env);
+        let op_id = client.set_config(&250u32, &treasury);  // propose
+        // Try to execute immediately (before 48 hours)
+        assert_eq!(
+            client.try_execute_config_change(&op_id),
+            Err(Ok(ContractError::TimelockNotElapsed))
+        );
+    }
+
+    #[test]
+    fn execute_config_change_succeeds_after_timelock() {
+        let env = Env::default();
+        let (client, _admin, treasury) = setup_factory(&env);
+        let op_id = client.set_config(&250u32, &treasury);
+        env.ledger().set_timestamp(env.ledger().timestamp() + TIMELOCK_DELAY_SECONDS + 1);
+        client.execute_config_change(&op_id);  // should succeed
+        assert_eq!(client.get_protocol_stats().protocol_fee_bp, 250);
+    }
+
+    #[test]
+    fn cancel_config_change_removes_pending_op() {
+        let env = Env::default();
+        let (client, _admin, treasury) = setup_factory(&env);
+        let op_id = client.set_config(&250u32, &treasury);
+        client.cancel_config_change(&op_id);
+        assert_eq!(client.try_execute_config_change(&op_id), Err(Ok(ContractError::NoPendingOp)));
     }
 }

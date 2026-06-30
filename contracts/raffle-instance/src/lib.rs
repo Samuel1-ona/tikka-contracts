@@ -12,7 +12,7 @@ mod randomness;
 
 use raffle_shared::{
     CancelReason, FailureReason, FairnessData, RaffleConfig, RaffleStatus, RandomnessSource, RandomnessType,
-    Ticket,
+    Ticket, TicketBundle,
 };
 
 use self::randomness::{build_vrf_proof_message, OracleSeedWinnerSelection, WinnerSelectionStrategy};
@@ -77,6 +77,7 @@ pub struct Raffle {
     pub swap_deadline_seconds: u64,
     /// When true, ticket purchases are blocked while the raffle remains Active.
     pub ticket_sales_paused: bool,
+    pub bundles: Vec<TicketBundle>,
 }
 
 #[contracttype]
@@ -205,15 +206,7 @@ fn write_raffle(env: &Env, raffle: &Raffle) {
     env.storage().instance().set(&DataKey::Raffle, raffle);
 }
 
-fn require_admin(env: &Env) -> Result<Address, Error> {
-    let admin: Address = env
-        .storage()
-        .persistent()
-        .get(&DataKey::Admin)
-        .ok_or(Error::NotAuthorized)?;
-    admin.require_auth();
-    Ok(admin)
-}
+raffle_shared::impl_require_admin!(Error, Error::NotAuthorized);
 
 /// Maximum protocol fee in basis points (20%) for per-raffle admin updates.
 pub const MAX_PROTOCOL_FEE_BP: u32 = 2_000;
@@ -367,17 +360,7 @@ fn transition_to_drawing(env: &Env, raffle: &mut Raffle, timestamp: u64) -> Resu
     Ok(())
 }
 
-fn require_not_paused(env: &Env) -> Result<(), Error> {
-    if env
-        .storage()
-        .instance()
-        .get(&DataKey::Paused)
-        .unwrap_or(false)
-    {
-        return Err(Error::ContractPaused);
-    }
-    Ok(())
-}
+raffle_shared::impl_require_not_paused!(Error, Error::ContractPaused, require_not_paused);
 
 fn validate_token_address(env: &Env, token_address: &Address) -> Result<(), Error> {
     let token_client = token::Client::new(env, token_address);
@@ -516,6 +499,21 @@ impl Contract {
             return Err(Error::InvalidParameters);
         }
 
+        if config.bundles.len() > 5 {
+            return Err(Error::InvalidParameters);
+        }
+        let mut last_quantity = 0;
+        for i in 0..config.bundles.len() {
+            let bundle = config.bundles.get(i).unwrap();
+            if bundle.quantity <= last_quantity {
+                return Err(Error::InvalidParameters);
+            }
+            if bundle.price_per_ticket < MIN_TICKET_PRICE || bundle.price_per_ticket > config.ticket_price {
+                return Err(Error::InvalidParameters);
+            }
+            last_quantity = bundle.quantity;
+        }
+
         // Validate that the payment_token is a valid token contract
         validate_token_address(&env, &config.payment_token)?;
 
@@ -560,6 +558,7 @@ impl Contract {
             claim_lockup_seconds: config.claim_lockup_seconds,
             swap_deadline_seconds: config.swap_deadline_seconds,
             ticket_sales_paused: false,
+            bundles: config.bundles.clone(),
         };
         write_raffle(&env, &raffle);
         env.storage().instance().set(&DataKey::Factory, &factory);
@@ -681,8 +680,16 @@ impl Contract {
         }
 
         let timestamp = env.ledger().timestamp();
-        let total_price = raffle
-            .ticket_price
+        
+        let mut effective_price = raffle.ticket_price;
+        for i in 0..raffle.bundles.len() {
+            let bundle = raffle.bundles.get(i).unwrap();
+            if quantity >= bundle.quantity && bundle.price_per_ticket < effective_price {
+                effective_price = bundle.price_per_ticket;
+            }
+        }
+
+        let total_price = effective_price
             .checked_mul(quantity as i128)
             .ok_or(Error::InvalidParameters)?;
 
@@ -826,7 +833,7 @@ impl Contract {
             buyer,
             ticket_ids,
             quantity,
-            ticket_price: raffle.ticket_price,
+            ticket_price: effective_price,
             total_paid: total_price,
             protocol_fee,
             timestamp,

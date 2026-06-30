@@ -255,6 +255,7 @@ stellar contract invoke ... -- \
 
 -   Rust toolchain
 -   Stellar CLI (optional for deployment)
+-   Editor/IDE with `.editorconfig` support (or plugin installed) for consistent code formatting
 
 ### **Run Tests**
 

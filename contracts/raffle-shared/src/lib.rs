@@ -50,6 +50,13 @@ pub enum RandomnessType {
     Fallback = 2,
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[contracttype]
+pub struct TicketBundle {
+    pub quantity: u32,
+    pub price_per_ticket: i128,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub struct RaffleConfig {
@@ -79,6 +86,7 @@ pub struct RaffleConfig {
     /// Swap deadline window in seconds (added to current timestamp for token swaps).
     /// Defaults to 300 (5 minutes) if zero. Configurable to handle network congestion.
     pub swap_deadline_seconds: u64,
+    pub bundles: Vec<TicketBundle>,
 }
 
 impl RaffleConfig {
@@ -174,4 +182,28 @@ pub trait RandomnessOracleTrait {
 #[soroban_sdk::contractclient(name = "RandomnessReceiverClient")]
 pub trait RandomnessReceiverTrait {
     fn receive_randomness(env: soroban_sdk::Env, request_id: u64, random_seed: u64);
+}
+
+#[macro_export]
+macro_rules! impl_require_admin {
+    ($error_type:ty, $not_authorized:expr) => {
+        fn require_admin(env: &soroban_sdk::Env) -> Result<soroban_sdk::Address, $error_type> {
+            let admin: soroban_sdk::Address = env.storage().persistent()
+                .get(&DataKey::Admin).ok_or($not_authorized)?;
+            admin.require_auth();
+            Ok(admin)
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_require_not_paused {
+    ($error_type:ty, $contract_paused:expr, $fn_name:ident) => {
+        fn $fn_name(env: &soroban_sdk::Env) -> Result<(), $error_type> {
+            if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+                return Err($contract_paused);
+            }
+            Ok(())
+        }
+    };
 }

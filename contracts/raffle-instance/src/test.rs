@@ -50,6 +50,7 @@ fn test_oracle_fallback_with_ledger_delays() {
         metadata_hash: BytesN::from_array(&env, &[1; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -134,6 +135,7 @@ fn test_admin_updates_oracle_address() {
         metadata_hash: BytesN::from_array(&env, &[2; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -184,6 +186,7 @@ fn test_admin_sets_protocol_fee_before_sales() {
         metadata_hash: BytesN::from_array(&env, &[3; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -243,6 +246,7 @@ fn test_admin_withdraws_accumulated_fees() {
         metadata_hash: BytesN::from_array(&env, &[4; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -314,6 +318,7 @@ fn test_buy_tickets_rejects_quantity_above_per_tx_cap() {
         metadata_hash: BytesN::from_array(&env, &[5; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -373,6 +378,7 @@ fn test_finalize_raffle_sets_drawing_lock_and_blocks_reentry() {
         metadata_hash: BytesN::from_array(&env, &[7; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -451,6 +457,7 @@ fn test_finalize_rollback_on_randomness_request_failure() {
         metadata_hash: BytesN::from_array(&env, &[8; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -525,6 +532,7 @@ fn test_allow_multiple_false_single_ticket_per_buyer() {
         metadata_hash: BytesN::from_array(&env, &[6; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -629,6 +637,7 @@ fn test_refund_ticket_after_cancel() {
         metadata_hash: BytesN::from_array(&env, &[5; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -695,6 +704,7 @@ fn test_refund_guard_released_after_success() {
         metadata_hash: BytesN::from_array(&env, &[6; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -762,6 +772,7 @@ fn test_claim_prize_pays_full_gross_with_protocol_fee() {
         metadata_hash: BytesN::from_array(&env, &[7; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -782,4 +793,68 @@ fn test_claim_prize_pays_full_gross_with_protocol_fee() {
 
     let ticket_fee = MIN_TICKET_PRICE * 1_000 / 10_000;
     assert_eq!(client.get_accumulated_fees(), ticket_fee);
+}
+
+#[test]
+fn test_bundle_pricing_applies() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let factory = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let token_admin = Address::generate(&env);
+    let payment_token = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let token_client = StellarAssetClient::new(&env, &payment_token);
+    token_client.mint(&creator, &100_000_000);
+    token_client.mint(&buyer, &100_000_000);
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let config = RaffleConfig {
+        description: String::from_str(&env, "Bundle test"),
+        end_time: 0,
+        no_deadline: true,
+        max_tickets: 50,
+        max_tickets_per_tx: 50,
+        min_tickets: 1,
+        allow_multiple: true,
+        ticket_price: 100_000,
+        payment_token: payment_token.clone(),
+        prize_amount: 100_000 * 50,
+        prizes: soroban_sdk::vec![&env, 10000],
+        randomness_source: RandomnessSource::Internal,
+        oracle_address: None,
+        protocol_fee_bp: 0,
+        treasury_address: None,
+        swap_router: None,
+        tikka_token: None,
+        metadata_hash: BytesN::from_array(&env, &[9; 32]),
+        claim_lockup_seconds: 0,
+        swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![
+            &env,
+            raffle_shared::TicketBundle { quantity: 5, price_per_ticket: 90_000 },
+            raffle_shared::TicketBundle { quantity: 10, price_per_ticket: 80_000 },
+            raffle_shared::TicketBundle { quantity: 20, price_per_ticket: 70_000 },
+        ],
+    };
+
+    client.init(&factory, &admin, &creator, &config);
+    env.as_contract(&contract_id, || {
+        env.storage().instance().remove(&DataKey::Factory);
+    });
+
+    client.deposit_prize();
+
+    let balance_before = token_client.balance(&buyer);
+    client.buy_tickets(&buyer, &11);
+    let balance_after = token_client.balance(&buyer);
+
+    assert_eq!(balance_before - balance_after, 11 * 80_000);
 }
