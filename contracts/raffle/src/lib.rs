@@ -106,27 +106,8 @@ pub enum ContractError {
 #[contract]
 pub struct RaffleFactory;
 
-fn require_admin(env: &Env) -> Result<Address, ContractError> {
-    let admin: Address = env
-        .storage()
-        .persistent()
-        .get(&DataKey::Admin)
-        .ok_or(ContractError::NotAuthorized)?;
-    admin.require_auth();
-    Ok(admin)
-}
-
-fn require_factory_not_paused(env: &Env) -> Result<(), ContractError> {
-    if env
-        .storage()
-        .instance()
-        .get(&DataKey::Paused)
-        .unwrap_or(false)
-    {
-        return Err(ContractError::ContractPaused);
-    }
-    Ok(())
-}
+raffle_shared::impl_require_admin!(ContractError, ContractError::NotAuthorized);
+raffle_shared::impl_require_not_paused!(ContractError, ContractError::ContractPaused, require_factory_not_paused);
 
 fn maybe_create_checkpoint(env: &Env, raffle_count: u32) {
     if raffle_count == 0 || !raffle_count.is_multiple_of(CHECKPOINT_INTERVAL) {

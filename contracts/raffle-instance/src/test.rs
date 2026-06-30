@@ -1511,6 +1511,7 @@ fn drawing_lock_cleared_after_internal_finalize() {
         metadata_hash: BytesN::from_array(&env, &[48; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![&env],
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -1751,4 +1752,68 @@ fn drawing_lock_cleared_after_cancel_in_drawing_state() {
     client.cancel_raffle(&CancelReason::CreatorCancelled);
 
     assert_drawing_lock_cleared(&env, &contract_id);
+}
+
+#[test]
+fn test_bundle_pricing_applies() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let factory = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let token_admin = Address::generate(&env);
+    let payment_token = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let token_client = StellarAssetClient::new(&env, &payment_token);
+    token_client.mint(&creator, &100_000_000);
+    token_client.mint(&buyer, &100_000_000);
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let config = RaffleConfig {
+        description: String::from_str(&env, "Bundle test"),
+        end_time: 0,
+        no_deadline: true,
+        max_tickets: 50,
+        max_tickets_per_tx: 50,
+        min_tickets: 1,
+        allow_multiple: true,
+        ticket_price: 100_000,
+        payment_token: payment_token.clone(),
+        prize_amount: 100_000 * 50,
+        prizes: soroban_sdk::vec![&env, 10000],
+        randomness_source: RandomnessSource::Internal,
+        oracle_address: None,
+        protocol_fee_bp: 0,
+        treasury_address: None,
+        swap_router: None,
+        tikka_token: None,
+        metadata_hash: BytesN::from_array(&env, &[9; 32]),
+        claim_lockup_seconds: 0,
+        swap_deadline_seconds: 0,
+        bundles: soroban_sdk::vec![
+            &env,
+            raffle_shared::TicketBundle { quantity: 5, price_per_ticket: 90_000 },
+            raffle_shared::TicketBundle { quantity: 10, price_per_ticket: 80_000 },
+            raffle_shared::TicketBundle { quantity: 20, price_per_ticket: 70_000 },
+        ],
+    };
+
+    client.init(&factory, &admin, &creator, &config);
+    env.as_contract(&contract_id, || {
+        env.storage().instance().remove(&DataKey::Factory);
+    });
+
+    client.deposit_prize();
+
+    let balance_before = token_client.balance(&buyer);
+    client.buy_tickets(&buyer, &11);
+    let balance_after = token_client.balance(&buyer);
+
+    assert_eq!(balance_before - balance_after, 11 * 80_000);
 }

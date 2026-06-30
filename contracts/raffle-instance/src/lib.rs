@@ -16,7 +16,7 @@ mod randomness;
 use raffle_shared::{
     CancelReason, FairnessData, RaffleConfig, RaffleStatus, RandomnessSource, RandomnessType,
     CancelReason, FailureReason, FairnessData, RaffleConfig, RaffleStatus, RandomnessSource, RandomnessType,
-    Ticket,
+    Ticket, TicketBundle,
 };
 
 use self::randomness::{
@@ -201,15 +201,7 @@ fn write_raffle(env: &Env, raffle: &Raffle) {
     env.storage().instance().set(&DataKey::Raffle, raffle);
 }
 
-fn require_admin(env: &Env) -> Result<Address, Error> {
-    let admin: Address = env
-        .storage()
-        .persistent()
-        .get(&DataKey::Admin)
-        .ok_or(Error::NotAuthorized)?;
-    admin.require_auth();
-    Ok(admin)
-}
+raffle_shared::impl_require_admin!(Error, Error::NotAuthorized);
 
 fn get_ticket_owner(env: &Env, ticket_id: u32) -> Option<Address> {
     env.storage()
@@ -361,17 +353,7 @@ fn transition_to_drawing(env: &Env, raffle: &mut Raffle, timestamp: u64) -> Resu
     Ok(())
 }
 
-fn require_not_paused(env: &Env) -> Result<(), Error> {
-    if env
-        .storage()
-        .instance()
-        .get(&DataKey::Paused)
-        .unwrap_or(false)
-    {
-        return Err(Error::ContractPaused);
-    }
-    Ok(())
-}
+raffle_shared::impl_require_not_paused!(Error, Error::ContractPaused, require_not_paused);
 
 fn validate_token_address(env: &Env, token_address: &Address) -> Result<(), Error> {
     let token_client = token::Client::new(env, token_address);
@@ -508,6 +490,21 @@ impl RaffleInstance {
 
         if config.metadata_hash == BytesN::from_array(&env, &[0u8; 32]) {
             return Err(Error::InvalidParameters);
+        }
+
+        if config.bundles.len() > 5 {
+            return Err(Error::InvalidParameters);
+        }
+        let mut last_quantity = 0;
+        for i in 0..config.bundles.len() {
+            let bundle = config.bundles.get(i).unwrap();
+            if bundle.quantity <= last_quantity {
+                return Err(Error::InvalidParameters);
+            }
+            if bundle.price_per_ticket < MIN_TICKET_PRICE || bundle.price_per_ticket > config.ticket_price {
+                return Err(Error::InvalidParameters);
+            }
+            last_quantity = bundle.quantity;
         }
 
         // Validate that the payment_token is a valid token contract
