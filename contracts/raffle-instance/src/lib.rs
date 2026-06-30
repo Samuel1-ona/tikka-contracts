@@ -120,6 +120,10 @@ pub enum DataKey {
     CommitEntry(u32),
     DrawingLock,
     TicketBuyers,
+    /// Per-owner ticket ID index: owner Address → Vec<u32> of ticket IDs.
+    /// Appended to on every successful ticket purchase, allowing O(1) owner
+    /// lookups without scanning the full ticket space.
+    OwnerTickets(Address),
 }
 
 #[contracttype]
@@ -761,6 +765,19 @@ impl Contract {
                 .set(&DataKey::Ticket(ticket_id), &ticket);
             ticket_ids.push_back(ticket_id);
         }
+
+        // Maintain the per-owner ticket ID index so get_my_tickets is O(1).
+        let mut owner_tickets: Vec<u32> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OwnerTickets(buyer.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        for i in 0..ticket_ids.len() {
+            owner_tickets.push_back(ticket_ids.get(i).unwrap());
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::OwnerTickets(buyer.clone()), &owner_tickets);
 
         // Update ticket count and raffle sold
         env.storage().persistent().set(
@@ -1568,6 +1585,18 @@ impl Contract {
         })
     }
 
+    /// Return all ticket IDs owned by `owner`.
+    ///
+    /// Uses the `OwnerTickets` index maintained during `buy_tickets` for an
+    /// O(1) read.  Falls back to an empty Vec when the address has never
+    /// purchased a ticket.
+    pub fn get_my_tickets(env: Env, owner: Address) -> Vec<u32> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::OwnerTickets(owner))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
     pub fn wipe_storage(env: Env) -> Result<(), Error> {
         let factory: Address = env
             .storage()
@@ -1602,6 +1631,9 @@ impl Contract {
             env.storage()
                 .persistent()
                 .remove(&DataKey::TicketCount(buyer.clone()));
+            env.storage()
+                .persistent()
+                .remove(&DataKey::OwnerTickets(buyer.clone()));
         }
         env.storage().persistent().remove(&DataKey::TicketBuyers);
 
@@ -1802,9 +1834,19 @@ impl Contract {
         return Err(Error::NoActiveTickets);
     }
 
-    let selector = OracleSeedWinnerSelection::new(seed);
-    let winning_ticket_ids =
-        selector.select_winner_indices(env, total_tickets, raffle.prizes.len());
+    let winning_ticket_ids = match raffle.randomness_source {
+        RandomnessSource::Internal | RandomnessSource::CommitReveal => {
+            PrngWinnerSelection::new(
+                env.current_contract_address(),
+                total_tickets,
+            )
+            .select_winner_indices(env, total_tickets, raffle.prizes.len())
+        }
+        RandomnessSource::External => {
+            OracleSeedWinnerSelection::new(seed)
+                .select_winner_indices(env, total_tickets, raffle.prizes.len())
+        }
+    };
     let mut winners = Vec::new(env);
 
     for i in 0..winning_ticket_ids.len() {
