@@ -25,8 +25,8 @@ fn test_oracle_fallback_with_ledger_delays() {
     let token_client = StellarAssetClient::new(&env, &payment_token);
     token_client.mint(&creator, &100_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     // 2. Initialize Raffle with External Randomness
     let config = RaffleConfig {
@@ -50,6 +50,8 @@ fn test_oracle_fallback_with_ledger_delays() {
         metadata_hash: BytesN::from_array(&env, &[1; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -108,8 +110,8 @@ fn test_admin_updates_oracle_address() {
     let oracle = Address::generate(&env);
     let new_oracle = Address::generate(&env);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Oracle migration"),
@@ -134,6 +136,8 @@ fn test_admin_updates_oracle_address() {
         metadata_hash: BytesN::from_array(&env, &[2; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -158,8 +162,8 @@ fn test_admin_sets_protocol_fee_before_sales() {
     let admin = Address::generate(&env);
     let creator = Address::generate(&env);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Fee update"),
@@ -184,6 +188,8 @@ fn test_admin_sets_protocol_fee_before_sales() {
         metadata_hash: BytesN::from_array(&env, &[3; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -219,8 +225,8 @@ fn test_admin_withdraws_accumulated_fees() {
     token_client.mint(&creator, &1_000_000);
     token_client.mint(&buyer, &1_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Fee withdraw"),
@@ -243,6 +249,8 @@ fn test_admin_withdraws_accumulated_fees() {
         metadata_hash: BytesN::from_array(&env, &[4; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -290,8 +298,8 @@ fn test_buy_tickets_rejects_quantity_above_per_tx_cap() {
     token_client.mint(&creator, &1_000_000);
     token_client.mint(&buyer, &1_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Per-tx cap"),
@@ -314,6 +322,8 @@ fn test_buy_tickets_rejects_quantity_above_per_tx_cap() {
         metadata_hash: BytesN::from_array(&env, &[5; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -350,14 +360,15 @@ fn test_finalize_raffle_sets_drawing_lock_and_blocks_reentry() {
     let token_client = StellarAssetClient::new(&env, &payment_token);
     token_client.mint(&creator, &1_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Drawing lock test"),
         end_time: 0,
         no_deadline: true,
         max_tickets: 1,
+        max_tickets_per_tx: 1,
         min_tickets: 1,
         allow_multiple: true,
         ticket_price: MIN_TICKET_PRICE,
@@ -373,6 +384,8 @@ fn test_finalize_raffle_sets_drawing_lock_and_blocks_reentry() {
         metadata_hash: BytesN::from_array(&env, &[7; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -428,14 +441,15 @@ fn test_finalize_rollback_on_randomness_request_failure() {
     let token_client = StellarAssetClient::new(&env, &payment_token);
     token_client.mint(&creator, &1_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Rollback test"),
         end_time: 0,
         no_deadline: true,
         max_tickets: 1,
+        max_tickets_per_tx: 1,
         min_tickets: 1,
         allow_multiple: true,
         ticket_price: MIN_TICKET_PRICE,
@@ -451,6 +465,8 @@ fn test_finalize_rollback_on_randomness_request_failure() {
         metadata_hash: BytesN::from_array(&env, &[8; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -502,14 +518,15 @@ fn test_allow_multiple_false_single_ticket_per_buyer() {
     token_client.mint(&buyer_a, &1_000_000);
     token_client.mint(&buyer_b, &1_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Test allow_multiple=false"),
         end_time: 0,
         no_deadline: true,
         max_tickets: 10,
+        max_tickets_per_tx: 10,
         min_tickets: 1,
         allow_multiple: false,
         ticket_price: MIN_TICKET_PRICE,
@@ -525,6 +542,8 @@ fn test_allow_multiple_false_single_ticket_per_buyer() {
         metadata_hash: BytesN::from_array(&env, &[6; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -605,8 +624,8 @@ fn test_refund_ticket_after_cancel() {
     token_client.mint(&creator, &1_000_000);
     token_client.mint(&buyer, &1_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Refund test"),
@@ -629,6 +648,8 @@ fn test_refund_ticket_after_cancel() {
         metadata_hash: BytesN::from_array(&env, &[5; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -671,8 +692,8 @@ fn test_refund_guard_released_after_success() {
     token_client.mint(&creator, &1_000_000);
     token_client.mint(&buyer, &1_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Guard release"),
@@ -695,6 +716,8 @@ fn test_refund_guard_released_after_success() {
         metadata_hash: BytesN::from_array(&env, &[6; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);
@@ -738,8 +761,8 @@ fn test_claim_prize_pays_full_gross_with_protocol_fee() {
     token_client.mint(&creator, &1_000_000);
     token_client.mint(&buyer, &1_000_000);
 
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
+    let contract_id = env.register(RaffleInstance, ());
+    let client = RaffleInstanceClient::new(&env, &contract_id);
 
     let config = RaffleConfig {
         description: String::from_str(&env, "Claim gross"),
@@ -762,6 +785,8 @@ fn test_claim_prize_pays_full_gross_with_protocol_fee() {
         metadata_hash: BytesN::from_array(&env, &[7; 32]),
         claim_lockup_seconds: 0,
         swap_deadline_seconds: 0,
+        prize_token: None,
+        nft_contract: None,
     };
 
     client.init(&factory, &admin, &creator, &config);

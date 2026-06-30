@@ -1,5 +1,7 @@
 #![no_std]
 
+pub mod constants;
+
 use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -79,6 +81,13 @@ pub struct RaffleConfig {
     /// Swap deadline window in seconds (added to current timestamp for token swaps).
     /// Defaults to 300 (5 minutes) if zero. Configurable to handle network congestion.
     pub swap_deadline_seconds: u64,
+    /// Optional separate token for the prize deposit and claim.
+    /// When `None` the prize token defaults to `payment_token` (current behaviour).
+    pub prize_token: Option<Address>,
+    /// Optional NFT contract address. When set, the contract will call
+    /// `mint(recipient, ticket_id, raffle_id)` on this contract after each
+    /// successful ticket purchase, issuing an on-chain NFT receipt per ticket.
+    pub nft_contract: Option<Address>,
 }
 
 impl RaffleConfig {
@@ -143,10 +152,12 @@ pub enum AdminOp {
     UpdateWasmHash(BytesN<32>),
 }
 
-pub const DEFAULT_PAGE_LIMIT: u32 = 100;
-pub const MAX_PAGE_LIMIT: u32 = 200;
-pub const DEFAULT_CLAIM_LOCKUP_SECONDS: u64 = 3_600;
-pub const DEFAULT_SWAP_DEADLINE_SECONDS: u64 = 300;
+// Pagination and timing constants are now in `constants.rs`.
+// Re-exported at crate root for backward compatibility.
+pub use constants::{
+    DEFAULT_CLAIM_LOCKUP_SECONDS, DEFAULT_PAGE_LIMIT, DEFAULT_SWAP_DEADLINE_SECONDS,
+    MAX_PAGE_LIMIT,
+};
 
 pub fn effective_limit(requested: u32) -> u32 {
     if requested == 0 {
@@ -174,4 +185,28 @@ pub trait RandomnessOracleTrait {
 #[soroban_sdk::contractclient(name = "RandomnessReceiverClient")]
 pub trait RandomnessReceiverTrait {
     fn receive_randomness(env: soroban_sdk::Env, request_id: u64, random_seed: u64);
+}
+
+/// Cross-contract interface for an NFT ticket contract.
+///
+/// The raffle-instance calls `mint` on this contract immediately after a
+/// successful ticket purchase.  The NFT contract is responsible for its own
+/// authorisation model; the raffle-instance supplies the raffle's own address
+/// as the `minter` so the NFT contract can restrict minting to known raffle
+/// contracts.
+///
+/// Parameters
+/// ----------
+/// * `recipient`  – the address that receives the NFT (the ticket buyer).
+/// * `ticket_id`  – the unique ticket ID within this raffle (1-indexed, u32).
+/// * `raffle_id`  – the raffle instance contract address, used as a namespace
+///                  so a single NFT contract can serve multiple raffles.
+#[soroban_sdk::contractclient(name = "NftTicketClient")]
+pub trait NftTicketTrait {
+    fn mint(
+        env: soroban_sdk::Env,
+        recipient: Address,
+        ticket_id: u32,
+        raffle_id: Address,
+    );
 }

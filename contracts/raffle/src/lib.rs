@@ -17,10 +17,7 @@ use raffle_shared::{
     effective_limit, AdminOp, FairnessData, PageResultRaffles, PaginationParams, RaffleConfig,
 };
 
-pub const TIMELOCK_DELAY_SECONDS: u64 = 172800; // 48 hours
-pub const CHECKPOINT_INTERVAL: u32 = 1_000;
-/// Maximum protocol fee in basis points (20%).
-pub const MAX_PROTOCOL_FEE_BP: u32 = 2_000;
+use raffle_shared::constants::{CHECKPOINT_INTERVAL, MAX_PROTOCOL_FEE_BP, TIMELOCK_DELAY_SECONDS};
 
 #[derive(Clone)]
 #[contracttype]
