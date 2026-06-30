@@ -92,6 +92,10 @@ pub trait WinnerSelectionStrategy {
 /// security caveat.
 #[allow(dead_code)]
 pub struct PrngWinnerSelection {
+    _timestamp: u64,
+    _sequence: u32,
+    raffle_id: Address,
+    tickets_sold: u32,
     pub timestamp: u64,
     pub sequence: u32,
     pub raffle_id: Address,
@@ -102,8 +106,8 @@ pub struct PrngWinnerSelection {
 impl PrngWinnerSelection {
     pub fn new(timestamp: u64, sequence: u32, raffle_id: Address, tickets_sold: u32) -> Self {
         Self {
-            timestamp,
-            sequence,
+            _timestamp: timestamp,
+            _sequence: sequence,
             raffle_id,
             tickets_sold,
         }
@@ -167,6 +171,18 @@ impl WinnerSelectionStrategy for PrngWinnerSelection {
 
         indices
     }
+}
+
+/// Builds the Ed25519 message that binds a VRF proof to a specific raffle request.
+///
+/// The oracle must sign this exact byte sequence when calling `provide_randomness`.
+pub fn build_vrf_proof_message(env: &Env, request_id: u64, random_seed: u64) -> Bytes {
+    (
+        env.current_contract_address(),
+        request_id,
+        random_seed,
+    )
+        .to_xdr(env)
 }
 
 /// Oracle-backed strategy using an externally provided VRF seed.

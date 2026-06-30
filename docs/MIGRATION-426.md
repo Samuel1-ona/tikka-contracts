@@ -51,7 +51,7 @@ get_raffle_count(env: Env) -> u32
 ### Removed / renamed
 
 - `DataKey::RaffleInstances` — removed entirely.
-- `require_registered_raffle` internal helper — removed (was an O(n) scan).
+- `require_registered_raffle` internal helper — removed (#412; was dead code that incorrectly called `raffle_address.require_auth()`).
 - `init_factory` no longer seeds an empty Vec.
 
 ---
