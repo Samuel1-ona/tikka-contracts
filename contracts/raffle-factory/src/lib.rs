@@ -1692,4 +1692,103 @@ mod tests {
         assert_eq!(pb.total, 1u32);
         assert_eq!(pb.items.get(0).unwrap(), b_addrs[0].clone());
     }
+
+    // -----------------------------------------------------------------------
+    // Factory admin two-step transfer tests (#453)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_admin_transfer_two_step_completes_correctly() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, _treasury) = setup_factory(&env);
+        let new_admin = Address::generate(&env);
+
+        client.transfer_factory_admin(&new_admin);
+        client.accept_factory_admin();
+
+        let actual: Address = env.as_contract(&client.address, || {
+            env.storage().persistent().get(&DataKey::Admin).unwrap()
+        });
+        assert_eq!(actual, new_admin);
+
+        let pending_still_exists: bool = env.as_contract(&client.address, || {
+            env.storage().persistent().has(&DataKey::PendingAdmin)
+        });
+        assert!(!pending_still_exists);
+    }
+
+    #[test]
+    fn test_admin_transfer_rejected_if_pending_already_exists() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, _treasury) = setup_factory(&env);
+        let admin_b = Address::generate(&env);
+        let admin_c = Address::generate(&env);
+
+        client.transfer_factory_admin(&admin_b);
+
+        assert_eq!(
+            client.try_transfer_factory_admin(&admin_c),
+            Err(Ok(ContractError::AdminTransferPending))
+        );
+    }
+
+    #[test]
+    fn test_admin_accept_fails_if_wrong_address_accepts() {
+        let env = Env::default();
+        let (client, _admin, _treasury) = setup_factory(&env);
+        let admin_b = Address::generate(&env);
+        let admin_c = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.transfer_factory_admin(&admin_b);
+
+        // Only admin_c is authorized — admin_b is the pending, so rejecting admin_b
+        // proves the caller must match PendingAdmin.
+        env.mock_auths(&[&admin_b]);
+        assert!(client.try_accept_factory_admin().is_err());
+    }
+
+    #[test]
+    fn test_admin_transfer_to_same_address_clears_pending() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, _treasury) = setup_factory(&env);
+        let new_admin = Address::generate(&env);
+
+        client.transfer_factory_admin(&new_admin);
+
+        let pending_before: bool = env.as_contract(&client.address, || {
+            env.storage().persistent().has(&DataKey::PendingAdmin)
+        });
+        assert!(pending_before);
+
+        // Proposing the current admin clears the pending entry
+        client.transfer_factory_admin(&admin);
+
+        let pending_after: bool = env.as_contract(&client.address, || {
+            env.storage().persistent().has(&DataKey::PendingAdmin)
+        });
+        assert!(!pending_after);
+
+        let actual: Address = env.as_contract(&client.address, || {
+            env.storage().persistent().get(&DataKey::Admin).unwrap()
+        });
+        assert_eq!(actual, admin);
+    }
+
+    #[test]
+    fn test_only_new_admin_can_accept_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, _treasury) = setup_factory(&env);
+        let new_admin = Address::generate(&env);
+
+        client.transfer_factory_admin(&new_admin);
+
+        // Old admin tries to accept — should fail because require_auth checks caller == PendingAdmin
+        env.mock_auths(&[&admin]);
+        assert!(client.try_accept_factory_admin().is_err());
+    }
 }
